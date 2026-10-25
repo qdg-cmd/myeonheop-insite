@@ -22,6 +22,7 @@ interface QuestionListProps {
   onDeleteQuestion?: (questionId: string) => void;
   onAddMoreQuestions?: (competency?: CompetencyType | 'all', count?: number) => void;
   onAddCommonQuestions?: () => void;
+  onGenerateSubjectQuestions?: (subject: string) => void;
   selectedSubjectFilter?: string | null;
   onClearSubjectFilter?: () => void;
   activeQuestionTab?: 'all' | 'starred' | CompetencyType | 'pressure' | 'completed';
@@ -34,6 +35,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   onDeleteQuestion,
   onAddMoreQuestions,
   onAddCommonQuestions,
+  onGenerateSubjectQuestions,
   selectedSubjectFilter,
   onClearSubjectFilter,
   activeQuestionTab,
@@ -134,11 +136,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           {[
             { id: 'all', label: `전체 (${questions.length})` },
             { id: 'starred', label: `★ 핵심 (${questions.filter((q) => q && q.starred).length})` },
-            { id: 'academic', label: '학업' },
-            { id: 'career', label: '진로' },
-            { id: 'community', label: '공동체' },
+            { id: 'academic', label: `학업 (${questions.filter((q) => q && q.competency === 'academic').length})` },
+            { id: 'career', label: `진로 (${questions.filter((q) => q && q.competency === 'career').length})` },
+            { id: 'community', label: `공동체 (${questions.filter((q) => q && q.competency === 'community').length})` },
             { id: 'university', label: `대학 (${questions.filter((q) => q && q.competency === 'university').length})` },
-            { id: 'pressure', label: '압박' },
+            { id: 'pressure', label: `압박 (${questions.filter((q) => q && q.type === 'pressure').length})` },
             { id: 'completed', label: `완료 (${questions.filter((q) => q && q.completed).length})` },
           ].map((tab) => {
             const isStarredTab = tab.id === 'starred';
@@ -453,8 +455,32 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         })}
 
         {filteredQuestions.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-500 text-xs space-y-2">
-            {activeTab === 'starred' ? (
+          <div className="text-center py-12 px-4 bg-white rounded-2xl border border-slate-200 text-slate-500 text-xs space-y-3">
+            {selectedSubjectFilter ? (
+              <div className="max-w-md mx-auto space-y-3">
+                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-bold text-slate-800 text-sm sm:text-base">
+                    '{selectedSubjectFilter}' 관련 예상 질문이 아직 없습니다.
+                  </p>
+                  <p className="text-slate-500 text-xs leading-relaxed">
+                    이 과목의 학생부 원문 기록을 바탕으로 실전 맞춤 질문 3문항(진위 확인, 심화 연계, 약점 방어)을 즉시 생성하시겠습니까?
+                  </p>
+                </div>
+                {onGenerateSubjectQuestions && (
+                  <button
+                    type="button"
+                    onClick={() => onGenerateSubjectQuestions(selectedSubjectFilter)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition shadow-blue-500/20 text-xs sm:text-sm"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>'{selectedSubjectFilter}' 맞춤 질문 3문항 생성하기</span>
+                  </button>
+                )}
+              </div>
+            ) : activeTab === 'starred' ? (
               <>
                 <Star className="w-8 h-8 text-amber-400 mx-auto stroke-1 fill-amber-100" />
                 <p className="font-bold text-slate-700 text-sm">아직 등록된 핵심 질문이 없습니다.</p>

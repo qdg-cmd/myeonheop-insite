@@ -626,3 +626,147 @@ export function generateAdditionalRuleQuestions(
     completed: false,
   }));
 }
+
+/**
+ * 특정 과목/영역(subject) 맞춤 3문항 즉시 생성 (진위 확인 1개 + 심화 연계 1개 + 위기/약점 방어 1개)
+ */
+export function generateSubject3Questions(
+  profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'>,
+  records: StudentRecordItem[],
+  existingQuestions: QuestionItem[]
+): QuestionItem[] {
+  if (records.length === 0) return [];
+  const primaryRecord = records[0];
+  const subjectName = primaryRecord.subject;
+  const gradeName = primaryRecord.grade || '공통';
+  const majorName = profile.targetMajor?.trim() || '지원 학과';
+
+  // 1. 해당 과목 레코드들을 대상으로 후보 풀 생성
+  const pool = buildRuleCandidatePool(
+    records,
+    majorName,
+    profile.targetUniversity || '지원 대학'
+  );
+
+  const existingTexts = new Set(existingQuestions.map((q) => q.question.trim()));
+  const picked: QuestionItem[] = [];
+
+  // 풀에서 record, deep, pressure 우선 매칭
+  const recordCandidates = pool.filter((q) => q.type === 'record' && !existingTexts.has(q.question.trim()));
+  const deepCandidates = pool.filter((q) => q.type === 'deep' && !existingTexts.has(q.question.trim()));
+  const pressureCandidates = pool.filter((q) => q.type === 'pressure' && !existingTexts.has(q.question.trim()));
+
+  // 1) 기록 진위 확인 문항
+  if (recordCandidates.length > 0) {
+    picked.push(
+      sanitizeQuestionItem(
+        recordCandidates[0],
+        existingQuestions.length + picked.length + 1
+      )
+    );
+    existingTexts.add(recordCandidates[0].question.trim());
+  } else {
+    let snippet = primaryRecord.text.split(/[.!?]\s+/)[0] || '';
+    if (snippet.length > 55) snippet = snippet.slice(0, 52) + '…';
+    picked.push({
+      id: `q-subj-rec-${Date.now()}-1`,
+      competency: primaryRecord.type === '창의적 체험활동' ? 'community' : 'academic',
+      type: 'record',
+      grade: gradeName,
+      subject: subjectName,
+      highlightText: snippet,
+      question: `(${gradeName} ${subjectName}) 학생부 기록 중 "${snippet}" 관련 활동을 주도적으로 시작하게 된 계기와, 본인이 담당했던 가장 핵심적인 역할은 무엇이었나요?`,
+      intent: `${subjectName} 활동에 대한 주도적 참여 동기 및 본인의 실질적 기여도(진위성) 검증`,
+      points: [
+        '활동을 기획하거나 시작하게 된 구체적인 지적 계기 제시',
+        '역할 분담 시 자신이 자발적으로 맡았던 핵심 업무와 기여도 설명',
+        '활동을 통해 도출한 결과물과 개인적 성장 포인트 강조',
+      ],
+      followUps: [
+        '그 활동을 진행하는 동안 가장 많은 시간과 노력을 투입했던 구체적인 과정은 무엇이었나요?',
+      ],
+      completed: false,
+      starred: true,
+    });
+  }
+
+  // 2) 심화 연계 문항
+  if (deepCandidates.length > 0) {
+    picked.push(
+      sanitizeQuestionItem(
+        deepCandidates[0],
+        existingQuestions.length + picked.length + 1
+      )
+    );
+    existingTexts.add(deepCandidates[0].question.trim());
+  } else {
+    let secondSnippet = primaryRecord.text.split(/[.!?]\s+/)[1] || primaryRecord.text.slice(0, 50);
+    if (secondSnippet.length > 55) secondSnippet = secondSnippet.slice(0, 52) + '…';
+    picked.push({
+      id: `q-subj-deep-${Date.now()}-2`,
+      competency: 'career',
+      type: 'deep',
+      grade: gradeName,
+      subject: subjectName,
+      highlightText: secondSnippet,
+      question: `(${gradeName} ${subjectName}) 수업 및 탐구 활동에서 다룬 개념이나 지적 호기심을 지원 전공인 ${majorName} 분야와 어떻게 연계하여 심화 탐구하였습니까?`,
+      intent: '교과 지식의 확장성 및 지원 전공과의 융합적 탐구 역량 검증',
+      points: [
+        '해당 교과에서 다룬 핵심 원리나 개념의 정확한 이해 제시',
+        `${majorName}의 전공 학문이나 최근 이슈와의 학문적 접점 설명`,
+        '대학 입학 후 이어가고 싶은 후속 연구나 학습 계획으로 확장',
+      ],
+      followUps: [
+        `그 탐구 내용을 ${majorName}의 관점에서 발전시킨다면 어떤 새로운 시각이나 시사점을 얻을 수 있을까요?`,
+      ],
+      completed: false,
+      starred: true,
+    });
+  }
+
+  // 3) 위기/약점 방어 문항
+  if (pressureCandidates.length > 0) {
+    picked.push(
+      sanitizeQuestionItem(
+        pressureCandidates[0],
+        existingQuestions.length + picked.length + 1
+      )
+    );
+    existingTexts.add(pressureCandidates[0].question.trim());
+  } else {
+    picked.push({
+      id: `q-subj-press-${Date.now()}-3`,
+      competency: 'academic',
+      type: 'pressure',
+      grade: gradeName,
+      subject: subjectName,
+      question: `(${gradeName} ${subjectName}) 활동을 진행하면서 예상치 못했던 난관이나 한계점은 무엇이었으며, 이를 극복하기 위해 어떤 노력을 기울였습니까?`,
+      intent: '위기 극복 능력, 문제 해결의 유연성, 비판적 자기 성찰 태도 평가',
+      points: [
+        '실패나 난관을 솔직하게 인정하고 원인을 객관적으로 분석',
+        '원인 해결을 위해 시도했던 자신만의 대안이나 소통/학습 노력 제시',
+        '극복 과정을 통해 배운 교훈과 태도의 긍정적 변화 강조',
+      ],
+      followUps: [
+        '다시 그 활동을 수행할 기회가 주어진다면 어떤 점을 보완하여 더 나은 결과를 만들고 싶나요?',
+      ],
+      defense: '결과에 대한 변명 대신, 과정에서 배운 회복탄력성과 성장을 중심으로 당당하게 답변하세요.',
+      completed: false,
+      starred: true,
+    });
+  }
+
+  return picked.map((q, idx) =>
+    sanitizeQuestionItem(
+      {
+        ...q,
+        id: `q-subj-custom-${existingQuestions.length + idx + 1}-${Date.now()}`,
+        subject: subjectName,
+        grade: gradeName,
+        completed: false,
+        starred: true,
+      },
+      existingQuestions.length + idx + 1
+    )
+  );
+}

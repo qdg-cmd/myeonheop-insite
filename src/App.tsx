@@ -9,7 +9,7 @@ import {
   saveStoredApiKeys,
 } from './lib/db';
 import { generateInterviewQuestions, sanitizeQuestionItem } from './lib/gemini';
-import { generateAdditionalRuleQuestions } from './lib/ruleEngine';
+import { generateAdditionalRuleQuestions, generateSubject3Questions } from './lib/ruleEngine';
 import { generateCommon10Questions } from './lib/commonQuestions';
 import { Header } from './components/Header';
 import { ApiKeyModal } from './components/ApiKeyModal';
@@ -136,6 +136,30 @@ export function App() {
       ...currentStudent,
       questions: [...commonQuestions, ...currentStudent.questions],
     };
+    setStudents((prev) => prev.map((s) => (s.id === updatedProfile.id ? updatedProfile : s)));
+    await saveStudent(updatedProfile);
+  };
+
+  // 특정 과목 맞춤 3문항 즉시 생성 (진위 확인 1 + 심화 연계 1 + 약점 방어 1)
+  const handleGenerateSubjectQuestions = async (subject: string) => {
+    if (!currentStudent) return;
+    const matchingRecords = currentStudent.records.filter((r) => r.subject === subject);
+    if (matchingRecords.length === 0) {
+      alert(`'${subject}' 과목에 해당하는 생기부 원문 기록을 찾을 수 없습니다.`);
+      return;
+    }
+
+    const new3Questions = generateSubject3Questions(
+      currentStudent,
+      matchingRecords,
+      currentStudent.questions
+    );
+
+    const updatedProfile: StudentProfile = {
+      ...currentStudent,
+      questions: [...currentStudent.questions, ...new3Questions],
+    };
+
     setStudents((prev) => prev.map((s) => (s.id === updatedProfile.id ? updatedProfile : s)));
     await saveStudent(updatedProfile);
   };
@@ -337,6 +361,7 @@ export function App() {
                   onDeleteQuestion={handleDeleteQuestion}
                   onAddMoreQuestions={handleAddMoreQuestions}
                   onAddCommonQuestions={handleAddCommonQuestions}
+                  onGenerateSubjectQuestions={handleGenerateSubjectQuestions}
                   selectedSubjectFilter={selectedSubjectFilter}
                   onClearSubjectFilter={() => setSelectedSubjectFilter(null)}
                   activeQuestionTab={questionFilterTab}

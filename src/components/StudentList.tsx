@@ -38,18 +38,18 @@ export const StudentList: React.FC<StudentListProps> = ({
         </div>
 
         {/* 3대 특징 배지 */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12 text-left">
-          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs">
-            <span className="text-xs font-bold text-blue-600 block mb-1">🔒 100% 로컬 보안</span>
-            <p className="text-xs text-slate-500 leading-relaxed">외부 데이터베이스 없이 브라우저 내에서만 안전하게 처리되고 저장됩니다.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-10">
+          <div className="p-3.5 bg-white rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-center gap-2">
+            <span className="text-sm">🔒</span>
+            <span className="text-xs font-bold text-slate-800">100% 로컬보안</span>
           </div>
-          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs">
-            <span className="text-xs font-bold text-emerald-600 block mb-1">🎯 나이스 PDF 정밀 파서</span>
-            <p className="text-xs text-slate-500 leading-relaxed">워터마크와 불필요한 인적사항을 걸러내고 실제 활동과 교과 세특만 정확하게 추출합니다.</p>
+          <div className="p-3.5 bg-white rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-center gap-2">
+            <span className="text-sm">🎯</span>
+            <span className="text-xs font-bold text-slate-800">학생부 PDF 정밀 파싱</span>
           </div>
-          <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-2xs">
-            <span className="text-xs font-bold text-purple-600 block mb-1">📄 3종 파일 내보내기</span>
-            <p className="text-xs text-slate-500 leading-relaxed">A4 인쇄용 워크시트(PDF), 상담용 Excel(CSV), 전체 데이터 JSON 백업을 지원합니다.</p>
+          <div className="p-3.5 bg-white rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-center gap-2">
+            <span className="text-sm">📄</span>
+            <span className="text-xs font-bold text-slate-800">파일 받기</span>
           </div>
         </div>
       </div>
