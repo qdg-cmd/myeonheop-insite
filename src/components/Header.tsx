@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { GraduationCap, Key, Plus, Trash2, Users, UploadCloud } from 'lucide-react';
+import { GraduationCap, Key, Plus, Trash2, Users, UploadCloud, ShieldCheck } from 'lucide-react';
 import { StudentProfile, ApiKeys } from '../types';
 
 interface HeaderProps {
@@ -74,6 +74,15 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* 모바일 전용 빠른 액션 버튼군 (sm 미만, 절대 텍스트 줄바꿈 방지) */}
           <div className="flex sm:hidden items-center gap-1 shrink-0">
+            {/* 학생부 PDF 마스킹 (모바일 퀵 버튼) */}
+            <button
+              onClick={() => window.open('https://qdg-cmd.github.io/pdf-masking/', '_blank', 'noopener,noreferrer')}
+              className="p-1.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition shadow-2xs shrink-0 whitespace-nowrap cursor-pointer"
+              title="학생부 PDF 마스킹"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            </button>
+
             <button
               onClick={onOpenNewModal}
               className="flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition whitespace-nowrap shrink-0"
@@ -137,6 +146,16 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 데스크톱/태블릿 액션 버튼군 (sm 이상 화면) */}
         <div className="hidden sm:flex items-center gap-2">
+          {/* 학생부 PDF 마스킹 (새 생기부 분석 좌측) */}
+          <button
+            onClick={() => window.open('https://qdg-cmd.github.io/pdf-masking/', '_blank', 'noopener,noreferrer')}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-xl transition shadow-2xs cursor-pointer"
+            title="개인정보 보호를 위한 학생부 PDF 마스킹 시스템 열기"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>PDF 마스킹</span>
+          </button>
+
           {/* 새 학생 추가 */}
           <button
             onClick={onOpenNewModal}

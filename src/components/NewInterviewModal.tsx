@@ -9,6 +9,7 @@ import {
   User,
   Plus,
   Trash2,
+  ShieldCheck,
 } from 'lucide-react';
 import { StudentRecordItem } from '../types';
 import { parseCustomStudentRecordHtml } from '../lib/htmlParser';
@@ -290,6 +291,31 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
 
             {activeTab === 'upload' ? (
               <div className="space-y-4">
+                {/* 개인정보 보호 마스킹 안내 배너 */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-emerald-950">
+                        개인정보 보호를 위해 마스킹이 필요하신가요?
+                      </p>
+                      <p className="text-[11px] text-emerald-700/90 leading-tight">
+                        학생부의 이름·주민번호·학교명을 안전하게 가릴 수 있습니다.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.open('https://qdg-cmd.github.io/pdf-masking/', '_blank', 'noopener,noreferrer')}
+                    className="self-start sm:self-auto flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl shadow-xs transition whitespace-nowrap cursor-pointer shrink-0"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>학생부 PDF 마스킹 도구 열기</span>
+                  </button>
+                </div>
+
                 {/* HTML5 드래그 앤 드롭 업로드 영역 */}
                 <div
                   onDragOver={(e) => {
