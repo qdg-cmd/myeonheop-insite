@@ -1,23 +1,44 @@
 import React, { useState } from 'react';
-import { Upload, FileText, CheckCircle2, AlertCircle, X, Sparkles, Building2, User } from 'lucide-react';
-import { StudentProfile, StudentRecordItem } from '../types';
+import {
+  Upload,
+  FileText,
+  AlertCircle,
+  X,
+  Sparkles,
+  Building2,
+  User,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import { StudentRecordItem } from '../types';
 import { parseCustomStudentRecordHtml } from '../lib/htmlParser';
 import { parsePdfOrTextFile } from '../lib/pdfParser';
 import { maskPersonalInfo } from '../lib/masking';
 
+export interface StudentInputProfile {
+  name: string;
+  targetUniversity: string;
+  targetMajor: string;
+  interviewType: string;
+  records: StudentRecordItem[];
+  includeCommonQuestions?: boolean;
+}
+
+interface UploadedStudentItem {
+  id: string;
+  file?: File;
+  name: string;
+  targetUniversity: string;
+  targetMajor: string;
+  records: StudentRecordItem[];
+  info?: string;
+  error?: string;
+}
+
 interface NewInterviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (
-    profileData: {
-      name: string;
-      targetUniversity: string;
-      targetMajor: string;
-      interviewType: string;
-      records: StudentRecordItem[];
-      includeCommonQuestions?: boolean;
-    }
-  ) => Promise<void>;
+  onSubmit: (profilesData: StudentInputProfile[]) => Promise<void>;
   isGenerating: boolean;
   generationStage: string;
 }
@@ -30,76 +51,138 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
   generationStage,
 }) => {
   const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
-  const [file, setFile] = useState<File | null>(null);
-  const [pastedText, setPastedText] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
 
-  // 지원 정보 (기본값 빈칸 및 회색 예시 플레이스홀더 제공)
-  const [studentName, setStudentName] = useState('');
-  const [targetUniversity, setTargetUniversity] = useState('');
-  const [targetMajor, setTargetMajor] = useState('');
+  // 공통 전형 설정
   const [interviewType, setInterviewType] = useState('학생부종합(면접형 - 서류확인+심층)');
   const [includeCommonQuestions, setIncludeCommonQuestions] = useState(true);
 
-  // 파싱 결과 미리보기 상태
-  const [parsedRecords, setParsedRecords] = useState<StudentRecordItem[]>([]);
-  const [detectedFileInfo, setDetectedFileInfo] = useState<string | null>(null);
+  // 업로드된 학생 목록 (1명 또는 다수 학생)
+  const [uploadedList, setUploadedList] = useState<UploadedStudentItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // 직접 붙여넣기 탭 상태
+  const [pastedName, setPastedName] = useState('');
+  const [pastedUniversity, setPastedUniversity] = useState('');
+  const [pastedMajor, setPastedMajor] = useState('');
+  const [pastedText, setPastedText] = useState('');
 
   if (!isOpen) return null;
 
-  // 파일 파싱 처리
-  const handleFileChange = async (selectedFile: File) => {
-    setFile(selectedFile);
+  // 파일 파싱 처리 (다중 파일 지원)
+  const handleFilesAdded = async (fileList: FileList | File[]) => {
+    const filesArray = Array.from(fileList);
+    if (filesArray.length === 0) return;
+
+    setIsParsing(true);
     setErrorMessage(null);
-    try {
-      if (selectedFile.name.endsWith('.html') || selectedFile.type === 'text/html') {
-        const htmlText = await selectedFile.text();
-        const { studentName: parsedName, records } = parseCustomStudentRecordHtml(htmlText);
-        setParsedRecords(records);
-        if (parsedName && parsedName !== '학생A') setStudentName(parsedName);
-        setDetectedFileInfo(`HTML 파일 파싱 성공: 총 ${records.length}개 세특/창체 항목 감지됨`);
-      } else {
-        const { records, detectedStudentName } = await parsePdfOrTextFile(selectedFile);
-        setParsedRecords(records);
-        if (detectedStudentName && !studentName) setStudentName(detectedStudentName);
-        setDetectedFileInfo(`나이스 PDF 정밀 파싱 완료: '${detectedStudentName || '학생'}' 학생의 ${records.length}개 창체·세특 항목 추출`);
+
+    const newItems: UploadedStudentItem[] = [];
+
+    for (let i = 0; i < filesArray.length; i++) {
+      const f = filesArray[i];
+      const itemId = `up-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+      try {
+        if (f.name.endsWith('.html') || f.type === 'text/html') {
+          const htmlText = await f.text();
+          const { studentName: parsedName, records } = parseCustomStudentRecordHtml(htmlText);
+          newItems.push({
+            id: itemId,
+            file: f,
+            name: parsedName && parsedName !== '학생A' ? parsedName : f.name.replace(/\.[^.]+$/, ''),
+            targetUniversity: '',
+            targetMajor: '',
+            records,
+            info: `HTML 파일: ${records.length}개 세특/창체 항목 감지`,
+          });
+        } else {
+          const { records, detectedStudentName } = await parsePdfOrTextFile(f);
+          newItems.push({
+            id: itemId,
+            file: f,
+            name: detectedStudentName || f.name.replace(/\.[^.]+$/, '').replace(/_masked$/, ''),
+            targetUniversity: '',
+            targetMajor: '',
+            records,
+            info: `나이스 파싱 완료: ${records.length}개 창체·세특 항목 추출`,
+          });
+        }
+      } catch (err) {
+        newItems.push({
+          id: itemId,
+          file: f,
+          name: f.name.replace(/\.[^.]+$/, ''),
+          targetUniversity: '',
+          targetMajor: '',
+          records: [],
+          error: err instanceof Error ? err.message : '파일 파싱에 실패했습니다.',
+        });
       }
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '파일 파싱에 실패했습니다.');
-      setParsedRecords([]);
     }
+
+    setUploadedList((prev) => [...prev, ...newItems]);
+    setIsParsing(false);
   };
 
+  const handleRemoveItem = (id: string) => {
+    setUploadedList((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleUpdateItem = (id: string, updates: Partial<UploadedStudentItem>) => {
+    setUploadedList((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+    );
+  };
+
+  const validItems = uploadedList.filter((item) => !item.error && item.records.length > 0);
+  const errorItems = uploadedList.filter((item) => Boolean(item.error));
+
   const handleStartAnalysis = async () => {
-    if (parsedRecords.length === 0 && !pastedText.trim()) {
-      setErrorMessage('분석할 학생부 파일(PDF/TXT)을 올리거나 텍스트를 입력해 주세요.');
-      return;
-    }
+    if (activeTab === 'upload') {
+      if (validItems.length === 0) {
+        setErrorMessage('분석할 학생부 파일(PDF/HTML/TXT)을 올려주세요.');
+        return;
+      }
 
-    let recordsToUse = parsedRecords;
-    if (recordsToUse.length === 0 && pastedText.trim()) {
-      const { maskedText } = maskPersonalInfo(pastedText, studentName || '학생A');
-      recordsToUse = [
+      const profilesToSubmit: StudentInputProfile[] = validItems.map((item) => ({
+        name: item.name.trim() || '학생',
+        targetUniversity: item.targetUniversity.trim() || '목표 대학교',
+        targetMajor: item.targetMajor.trim() || '일반 전공',
+        interviewType,
+        records: item.records,
+        includeCommonQuestions,
+      }));
+
+      await onSubmit(profilesToSubmit);
+    } else {
+      if (!pastedText.trim()) {
+        setErrorMessage('생기부 원문 텍스트를 입력해 주세요.');
+        return;
+      }
+
+      const { maskedText } = maskPersonalInfo(pastedText, pastedName || '학생A');
+      const pastedRecord: StudentRecordItem = {
+        id: `rec-pasted-${Date.now()}`,
+        grade: '공통',
+        type: '학생부 원문',
+        subject: '전체',
+        text: maskedText,
+        tags: ['자기주도성', '전공적합성'],
+        highlightSpans: [],
+      };
+
+      await onSubmit([
         {
-          id: 'rec-pasted-1',
-          grade: '공통',
-          type: '학생부 원문',
-          subject: '전체',
-          text: maskedText,
-          tags: ['자기주도성', '전공적합성'],
-          highlightSpans: [],
+          name: pastedName.trim() || '학생A',
+          targetUniversity: pastedUniversity.trim() || '목표 대학교',
+          targetMajor: pastedMajor.trim() || '일반 전공',
+          interviewType,
+          records: [pastedRecord],
+          includeCommonQuestions,
         },
-      ];
+      ]);
     }
-
-    await onSubmit({
-      name: studentName.trim() || '학생A',
-      targetUniversity: targetUniversity.trim() || '목표 대학교',
-      targetMajor: targetMajor.trim() || '일반 전공',
-      interviewType,
-      records: recordsToUse,
-      includeCommonQuestions,
-    });
   };
 
   return (
@@ -113,7 +196,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-800 text-lg">새 학생부 분석 및 면접 준비</h3>
-              <p className="text-xs text-slate-500">학생부 PDF 업로드 후 대학별 맞춤 질문 생성</p>
+              <p className="text-xs text-slate-500">학생부 파일 업로드 후 대학별 맞춤 질문 생성</p>
             </div>
           </div>
           {!isGenerating && (
@@ -135,25 +218,15 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
             </div>
           )}
 
-          {/* 1단계: 지원 정보 입력 (기본값 빈칸, 예시는 연한 회색 플레이스홀더) */}
+          {/* 1단계: 지원 전형 및 옵션 설정 */}
           <div className="space-y-4">
-            <h4 className="text-xs font-extrabold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
-              <Building2 className="w-4 h-4" /> 1. 목표 대학 및 지원 정보
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <User className="w-3.5 h-3.5 text-slate-400" /> 학생 이름 (식별명)
-                </label>
-                <input
-                  type="text"
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  placeholder="예: 홍길동"
-                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium placeholder:text-slate-400 placeholder:font-normal transition"
-                />
-              </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-extrabold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
+                <Building2 className="w-4 h-4" /> 1. 공통 전형 설정
+              </h4>
+            </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">지원 전형 유형</label>
                 <select
@@ -165,51 +238,25 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                 </select>
               </div>
 
-              {/* 지원 대학 (선택이 아닌 직접 텍스트 입력) */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400" /> 지원 대학
+              {/* 대학 공통 필수 10선 기본 포함 옵션 */}
+              <div className="bg-purple-50/70 border border-purple-200/80 rounded-2xl p-3 flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id="includeCommonQuestions"
+                  checked={includeCommonQuestions}
+                  onChange={(e) => setIncludeCommonQuestions(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-purple-600 rounded-md border-purple-300 focus:ring-purple-500 shrink-0 cursor-pointer"
+                />
+                <label htmlFor="includeCommonQuestions" className="cursor-pointer select-none">
+                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                    대학 공통 필수 질문 10선 포함
+                  </span>
+                  <span className="text-[11px] text-purple-700/90 leading-relaxed block mt-0.5">
+                    자기소개, 지원동기, 학업계획 등 10문항을 질문지 맨 앞에 함께 생성합니다.
+                  </span>
                 </label>
-                <input
-                  type="text"
-                  value={targetUniversity}
-                  onChange={(e) => setTargetUniversity(e.target.value)}
-                  placeholder="예: 서울대학교, 연세대학교, 고려대학교 등"
-                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium placeholder:text-slate-400 placeholder:font-normal transition"
-                />
               </div>
-
-              {/* 지원 학과 */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">지원 학과 / 전공</label>
-                <input
-                  type="text"
-                  value={targetMajor}
-                  onChange={(e) => setTargetMajor(e.target.value)}
-                  placeholder="예: 컴퓨터공학과, 경영학과, 제과제빵학과 등"
-                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium placeholder:text-slate-400 placeholder:font-normal transition"
-                />
-              </div>
-            </div>
-
-            {/* 대학 공통 필수 10선 기본 포함 옵션 */}
-            <div className="bg-purple-50/70 border border-purple-200/80 rounded-2xl p-3 sm:p-3.5 flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="includeCommonQuestions"
-                checked={includeCommonQuestions}
-                onChange={(e) => setIncludeCommonQuestions(e.target.checked)}
-                className="mt-0.5 w-4 h-4 text-purple-600 rounded-md border-purple-300 focus:ring-purple-500 shrink-0 cursor-pointer"
-              />
-              <label htmlFor="includeCommonQuestions" className="cursor-pointer select-none">
-                <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                  대학 공통 필수 면접 질문 10선 기본 포함 (권장)
-                </span>
-                <span className="text-[11px] text-purple-700/90 leading-relaxed block mt-0.5">
-                  1분 자기소개, 지원동기, 학업계획, 갈등관리, 실패극복 등 대학 면접 핵심 10문항을 질문지 맨 앞에 함께 생성합니다.
-                </span>
-              </label>
             </div>
           </div>
 
@@ -228,7 +275,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                   activeTab === 'upload' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                파일 업로드 (PDF / HTML / TXT)
+                파일 업로드 (드래그 앤 드롭)
               </button>
               <button
                 type="button"
@@ -242,47 +289,241 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
             </div>
 
             {activeTab === 'upload' ? (
-              <div>
-                <label className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-50/50 hover:bg-blue-50/20 transition group">
-                  <div className="p-3 bg-white group-hover:bg-blue-100 text-slate-400 group-hover:text-blue-600 rounded-2xl shadow-xs border border-slate-200 mb-3 transition">
-                    <Upload className="w-6 h-6" />
-                  </div>
-                  <p className="text-sm font-bold text-slate-700 mb-1">
-                    {file ? file.name : '학생부 PDF, HTML 또는 텍스트 파일을 여기에 끌어다 놓으세요'}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    나이스/에듀파인 PDF (.pdf), HTML (.html) 또는 텍스트 (.txt) 파일 지원
-                  </p>
-                  <input
-                    type="file"
-                    accept=".pdf,.txt,.html,.htm"
-                    onChange={(e) => {
-                      if (e.target.files?.[0]) handleFileChange(e.target.files[0]);
-                    }}
-                    className="hidden"
-                  />
-                </label>
+              <div className="space-y-4">
+                {/* HTML5 드래그 앤 드롭 업로드 영역 */}
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (e.dataTransfer.files?.length) {
+                      handleFilesAdded(e.dataTransfer.files);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-3xl p-6 sm:p-7 flex flex-col items-center justify-center text-center transition cursor-pointer group ${
+                    isDragging
+                      ? 'border-blue-600 bg-blue-50/70 scale-[1.01]'
+                      : 'border-slate-300 hover:border-blue-500 bg-slate-50/50 hover:bg-blue-50/20'
+                  }`}
+                >
+                  <label className="cursor-pointer flex flex-col items-center w-full">
+                    <div className="p-3 bg-white group-hover:bg-blue-100 text-slate-400 group-hover:text-blue-600 rounded-2xl shadow-xs border border-slate-200 mb-3 transition">
+                      <Upload className="w-6 h-6" />
+                    </div>
+                    <p className="text-sm font-bold text-slate-700 mb-1">
+                      {isDragging
+                        ? '여기에 파일을 놓으시면 바로 분석됩니다!'
+                        : '학생부 PDF, HTML 또는 텍스트 파일을 여기에 끌어다 놓으세요'}
+                    </p>
+                    <p className="text-xs text-slate-400 mb-3">
+                      나이스 PDF (.pdf), HTML (.html) 또는 텍스트 (.txt) 파일 지원 (여러 파일 동시 드래그 가능)
+                    </p>
+                    <span className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition">
+                      내 컴퓨터에서 파일 선택 (다중 선택 가능)
+                    </span>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,.txt,.html,.htm"
+                      onChange={(e) => {
+                        if (e.target.files?.length) handleFilesAdded(e.target.files);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
 
-                {detectedFileInfo && (
-                  <div className="mt-2.5 flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-medium">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{detectedFileInfo}</span>
+                {isParsing && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-xs font-medium flex items-center justify-center gap-2 animate-pulse">
+                    <Sparkles className="w-4 h-4 animate-spin text-blue-600" />
+                    <span>파일을 정밀 분석하고 학생 성명 및 세특을 추출 중입니다…</span>
+                  </div>
+                )}
+
+                {/* 업로드된 학생 목록 및 개별 대학/학과 입력란 */}
+                {uploadedList.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-blue-600" />
+                        업로드된 학생 목록 ({validItems.length}명 정상
+                        {errorItems.length > 0 && (
+                          <span className="text-rose-600 font-semibold">, {errorItems.length}개 파일 오류</span>
+                        )}
+                        )
+                      </span>
+                      <label className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 text-xs font-semibold rounded-lg cursor-pointer transition flex items-center gap-1">
+                        <Plus className="w-3.5 h-3.5" /> 파일 더 추가
+                        <input
+                          type="file"
+                          multiple
+                          accept=".pdf,.txt,.html,.htm"
+                          onChange={(e) => {
+                            if (e.target.files?.length) handleFilesAdded(e.target.files);
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="space-y-3">
+                      {uploadedList.map((item) => {
+                        if (item.error) {
+                          return (
+                            <div
+                              key={item.id}
+                              className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs text-rose-800"
+                            >
+                              <div className="flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                                <div>
+                                  <span className="font-bold">{item.file?.name || item.name}</span>: {item.error}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(item.id)}
+                                className="p-1 text-rose-400 hover:text-rose-700 transition"
+                                title="목록에서 제거"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="p-4 bg-slate-50/70 border border-slate-200/90 rounded-2xl space-y-3 hover:border-blue-300 transition"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                                <span className="text-xs font-bold text-slate-800 truncate max-w-[220px] sm:max-w-[340px]">
+                                  {item.file?.name}
+                                </span>
+                                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                                  {item.records.length}개 세특/창체
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(item.id)}
+                                className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-slate-100 transition"
+                                title="이 학생부 제거"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* 학생별 정보 입력란 (학생 이름, 지원 대학, 지원 학과) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                                  <User className="w-3 h-3 text-slate-400" /> 학생 이름
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.name}
+                                  onChange={(e) => handleUpdateItem(item.id, { name: e.target.value })}
+                                  placeholder="학생 성명"
+                                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-bold text-slate-900"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                                  <Building2 className="w-3 h-3 text-slate-400" /> 지원 대학
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.targetUniversity}
+                                  onChange={(e) => handleUpdateItem(item.id, { targetUniversity: e.target.value })}
+                                  placeholder="예: 서울대학교"
+                                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400 font-medium"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-600 mb-1">지원 학과 / 전공</label>
+                                <input
+                                  type="text"
+                                  value={item.targetMajor}
+                                  onChange={(e) => handleUpdateItem(item.id, { targetMajor: e.target.value })}
+                                  placeholder="예: 약학과, 컴퓨터공학과 등"
+                                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400 font-medium"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
             ) : (
-              <div>
-                <textarea
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  placeholder="생기부 세특 및 창체 내용을 복사하여 여기에 붙여넣으세요..."
-                  className="w-full h-40 p-3.5 text-xs bg-slate-50 border border-slate-300 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 leading-relaxed font-sans placeholder:text-slate-400"
-                />
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                      <User className="w-3 h-3 text-slate-400" /> 학생 이름
+                    </label>
+                    <input
+                      type="text"
+                      value={pastedName}
+                      onChange={(e) => setPastedName(e.target.value)}
+                      placeholder="예: 홍길동"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-bold text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                      <Building2 className="w-3 h-3 text-slate-400" /> 지원 대학
+                    </label>
+                    <input
+                      type="text"
+                      value={pastedUniversity}
+                      onChange={(e) => setPastedUniversity(e.target.value)}
+                      placeholder="예: 연세대학교"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">지원 학과 / 전공</label>
+                    <input
+                      type="text"
+                      value={pastedMajor}
+                      onChange={(e) => setPastedMajor(e.target.value)}
+                      placeholder="예: 경영학과"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <textarea
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="생기부 세특 및 창체 내용을 복사하여 여기에 붙여넣으세요..."
+                    className="w-full h-40 p-3.5 text-xs bg-slate-50 border border-slate-300 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 leading-relaxed font-sans placeholder:text-slate-400"
+                  />
+                </div>
               </div>
             )}
           </div>
 
-          {/* 진행 상태 인디케이터 (10개 단위 배치 진행 안내) */}
+          {/* 진행 상태 인디케이터 */}
           {isGenerating && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl space-y-2.5 animate-pulse">
               <div className="flex items-center justify-between text-xs font-bold text-blue-900">
@@ -310,12 +551,21 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
           </button>
           <button
             type="button"
-            disabled={isGenerating || (parsedRecords.length === 0 && !pastedText.trim())}
+            disabled={
+              isGenerating ||
+              isParsing ||
+              (activeTab === 'upload' && validItems.length === 0) ||
+              (activeTab === 'paste' && !pastedText.trim())
+            }
             onClick={handleStartAnalysis}
             className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 rounded-xl shadow-xs transition shadow-blue-500/20"
           >
             <Sparkles className="w-4 h-4" />
-            {isGenerating ? '질문 생성 진행 중…' : 'AI 예상 면접 질문 생성'}
+            {isGenerating
+              ? '질문 생성 진행 중…'
+              : activeTab === 'upload' && validItems.length > 1
+              ? `총 ${validItems.length}명 학생 AI 예상 면접 질문 일괄 생성`
+              : 'AI 예상 면접 질문 생성'}
           </button>
         </div>
       </div>

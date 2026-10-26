@@ -14,11 +14,25 @@ export const RecordTable: React.FC<RecordTableProps> = ({
   onSelectSubjectForQuestions,
 }) => {
   const [selectedGrade, setSelectedGrade] = useState<string>('all');
+  const [selectedType, setSelectedType] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  const typeCounts = {
+    all: records.length,
+    changche: records.filter((r) => r.type === '창의적 체험활동').length,
+    setek: records.filter((r) => r.type === '교과학습발달').length,
+    behavior: records.filter((r) => r.type === '행동특성및종합의견').length,
+  };
 
   const filteredRecords = records.filter((r) => {
     if (!r) return false;
     const matchesGrade = selectedGrade === 'all' || r.grade === selectedGrade;
+    const matchesType =
+      selectedType === 'all' ||
+      (selectedType === 'changche' && r.type === '창의적 체험활동') ||
+      (selectedType === 'setek' && r.type === '교과학습발달') ||
+      (selectedType === 'behavior' && r.type === '행동특성및종합의견');
+
     const term = searchTerm.toLowerCase().trim();
     const matchesSearch =
       term === '' ||
@@ -26,52 +40,74 @@ export const RecordTable: React.FC<RecordTableProps> = ({
       (typeof r.text === 'string' && r.text.toLowerCase().includes(term)) ||
       (Array.isArray(r.tags) &&
         r.tags.some((t) => typeof t === 'string' && t.toLowerCase().includes(term)));
-    return matchesGrade && matchesSearch;
+    return matchesGrade && matchesType && matchesSearch;
   });
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
       {/* 헤더 및 필터 툴바 */}
-      <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2 shrink-0">
-            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 shrink-0" />
-            <h3 className="font-bold text-slate-800 text-sm sm:text-base whitespace-nowrap shrink-0">
-              <span className="sm:hidden">생기부 원문 분석</span>
-              <span className="hidden sm:inline">생기부 원문 기록 & 역량 분석</span>
+      <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/60 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-blue-600 shrink-0" />
+            <h3 className="font-bold text-slate-800 text-sm sm:text-base">
+              생기부 원문 기록 & 역량 분석
             </h3>
-          </div>
-          <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-semibold whitespace-nowrap shrink-0">
-            총 {filteredRecords.length}개
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* 학년 탭 */}
-          <div className="flex items-center bg-white border border-slate-200 rounded-xl p-0.5 text-xs font-semibold shadow-2xs overflow-x-auto">
-            {['all', '1학년', '2학년', '3학년'].map((g) => (
-              <button
-                key={g}
-                onClick={() => setSelectedGrade(g)}
-                className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0 ${
-                  selectedGrade === g
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <span className="whitespace-nowrap">{g === 'all' ? '전체' : g}</span>
-              </button>
-            ))}
+            <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-semibold whitespace-nowrap">
+              총 {filteredRecords.length}개
+            </span>
           </div>
 
           {/* 검색창 */}
           <input
             type="text"
-            placeholder="과목, 키워드 검색…"
+            placeholder="과목, 본문, 역량 검색…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="text-xs bg-white border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 flex-1 sm:flex-initial sm:w-44"
+            className="text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 w-full sm:w-56 shadow-2xs font-medium"
           />
+        </div>
+
+        {/* 2단 필터: 영역별 탭 & 학년별 탭 */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 pt-1 border-t border-slate-200/60">
+          {/* 영역별 탭 (전체 | 창체 | 교과 세특 | 행특) */}
+          <div className="flex items-center bg-white border border-slate-200 rounded-xl p-0.5 text-xs font-semibold shadow-2xs overflow-x-auto">
+            {[
+              { id: 'all', label: `전체 (${typeCounts.all})` },
+              { id: 'changche', label: `창체 (${typeCounts.changche})` },
+              { id: 'setek', label: `교과 세특 (${typeCounts.setek})` },
+              { id: 'behavior', label: `행특 (${typeCounts.behavior})` },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedType(tab.id)}
+                className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0 ${
+                  selectedType === tab.id
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 학년 탭 (전체 | 1학년 | 2학년 | 3학년) */}
+          <div className="flex items-center bg-white border border-slate-200 rounded-xl p-0.5 text-xs font-semibold shadow-2xs overflow-x-auto self-start md:self-auto">
+            {['all', '1학년', '2학년', '3학년'].map((g) => (
+              <button
+                key={g}
+                onClick={() => setSelectedGrade(g)}
+                className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0 ${
+                  selectedGrade === g
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {g === 'all' ? '전체 학년' : g}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

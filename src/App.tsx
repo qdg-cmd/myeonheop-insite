@@ -69,56 +69,81 @@ export function App() {
 
   const currentStudent = students.find((s) => s.id === currentStudentId) || null;
 
-  // 새 학생 생성 및 AI 분석
-  const handleCreateStudent = async (data: {
-    name: string;
-    targetUniversity: string;
-    targetMajor: string;
-    interviewType: string;
-    records: StudentRecordItem[];
-    includeCommonQuestions?: boolean;
-  }) => {
+  // 새 학생 생성 및 AI 분석 (단일 또는 다수 일괄 처리 지원)
+  const handleCreateStudent = async (
+    inputData:
+      | {
+          name: string;
+          targetUniversity: string;
+          targetMajor: string;
+          interviewType: string;
+          records: StudentRecordItem[];
+          includeCommonQuestions?: boolean;
+        }
+      | Array<{
+          name: string;
+          targetUniversity: string;
+          targetMajor: string;
+          interviewType: string;
+          records: StudentRecordItem[];
+          includeCommonQuestions?: boolean;
+        }>
+  ) => {
+    const list = Array.isArray(inputData) ? inputData : [inputData];
+    if (list.length === 0) return;
+
     setIsGenerating(true);
-    setGenerationStage('AI 질문 생성 파이프라인 가동 중…');
+    const createdProfiles: StudentProfile[] = [];
 
     try {
-      const generatedQuestions = await generateInterviewQuestions(
-        {
-          name: data.name,
-          targetUniversity: data.targetUniversity,
-          targetMajor: data.targetMajor,
-          interviewType: data.interviewType,
-        },
-        data.records,
-        apiKeys,
-        (stage) => setGenerationStage(stage)
-      );
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        const studentPrefix =
+          list.length > 1 ? `[${i + 1}/${list.length}] '${item.name}' 학생: ` : '';
+        setGenerationStage(`${studentPrefix}AI 질문 생성 파이프라인 가동 중…`);
 
-      // 대학 공통 필수 10선 질문지 맨 앞(#1~#10)에 배치
-      const commonQuestions =
-        data.includeCommonQuestions !== false
-          ? generateCommon10Questions({
-              name: data.name,
-              targetUniversity: data.targetUniversity,
-              targetMajor: data.targetMajor,
-              interviewType: data.interviewType,
-            })
-          : [];
+        const generatedQuestions = await generateInterviewQuestions(
+          {
+            name: item.name,
+            targetUniversity: item.targetUniversity,
+            targetMajor: item.targetMajor,
+            interviewType: item.interviewType,
+          },
+          item.records,
+          apiKeys,
+          (stage) => setGenerationStage(`${studentPrefix}${stage}`)
+        );
 
-      const newProfile: StudentProfile = {
-        id: `std-${Date.now()}`,
-        name: data.name,
-        targetUniversity: data.targetUniversity,
-        targetMajor: data.targetMajor,
-        interviewType: data.interviewType,
-        createdAt: new Date().toISOString(),
-        records: data.records,
-        questions: [...commonQuestions, ...generatedQuestions],
-      };
+        // 대학 공통 필수 10선 질문지 맨 앞(#1~#10)에 배치
+        const commonQuestions =
+          item.includeCommonQuestions !== false
+            ? generateCommon10Questions({
+                name: item.name,
+                targetUniversity: item.targetUniversity,
+                targetMajor: item.targetMajor,
+                interviewType: item.interviewType,
+              })
+            : [];
 
-      await saveStudent(newProfile);
-      setStudents((prev) => [newProfile, ...prev]);
-      setCurrentStudentId(newProfile.id);
+        const newProfile: StudentProfile = {
+          id: `std-${Date.now()}-${i}`,
+          name: item.name,
+          targetUniversity: item.targetUniversity,
+          targetMajor: item.targetMajor,
+          interviewType: item.interviewType,
+          createdAt: new Date().toISOString(),
+          records: item.records,
+          questions: [...commonQuestions, ...generatedQuestions],
+        };
+
+        await saveStudent(newProfile);
+        createdProfiles.push(newProfile);
+      }
+
+      setStudents((prev) => [...createdProfiles, ...prev]);
+      if (createdProfiles.length > 0) {
+        setCurrentStudentId(createdProfiles[0].id);
+      }
       setIsNewModalOpen(false);
       setActiveTab('questions');
     } catch (err) {

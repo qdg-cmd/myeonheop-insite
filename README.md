@@ -1,4 +1,5 @@
 # 🎓 면접인사이트 (Interview Insight Web)
+
 > **학생부(생기부) 기반 대학별 AI 면접 준비 & 워크시트 생성 솔루션**  
 > 100% 브라우저 로컬 구동 · Zero-Server Storage · 외부 유출 없는 완전한 보안
 
@@ -60,9 +61,11 @@ npm run dev
 본 프로젝트는 정적 웹(SPA)으로 빌드되므로, GitHub Pages에 100% 무료로 호스팅할 수 있습니다.
 
 ### 1단계: 새 깃허브 리포지토리 생성
+
 GitHub 웹사이트에서 `myeonjeop-on` 등의 이름으로 새 공개(Public) 또는 비공개(Private) 저장소를 만듭니다.
 
 ### 2단계: 프로젝트 푸시
+
 `myeonjeop-on-web` 폴더 안에서 다음 명령어를 실행합니다:
 
 ```bash
@@ -76,6 +79,7 @@ git push -u origin main
 ```
 
 ### 3단계: GitHub Pages 활성화
+
 1. 깃허브 저장소 페이지의 **Settings** 탭 클릭
 2. 좌측 메뉴의 **Pages** 클릭
 3. **Build and deployment** > **Source** 항목에서 **`GitHub Actions`**를 선택

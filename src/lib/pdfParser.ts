@@ -123,17 +123,23 @@ export function parseNeisStudentRecordsFromPages(pages: string[]): {
   const records: StudentRecordItem[] = [];
 
   // 2. 3대 핵심 대단원 영역 분할
-  const changcheStart = doc.search(/(?:6\.\s*)?창의적\s*체험활동상황/);
-  const subjectStart = doc.search(/(?:7\.\s*)?교과학습발달상황/);
-  const behaviorStart = doc.search(/(?:9\.\s*)?행동특성\s*및\s*종합의견/);
+  const changcheStart = doc.search(/(?:[1-9]\.\s*)?창의적\s*체험활동상황/);
+  const subjectStart = doc.search(/(?:[1-9]\.\s*)?교과학습발달상황/);
+  const behaviorStart = doc.search(/(?:[1-9]\.\s*)?행동특성\s*및\s*종합의견/);
+  const dokseoStart = doc.search(/(?:[1-9]\.\s*)?독서\s*활동\s*상황/);
 
   const changcheText =
     changcheStart !== -1
       ? doc.slice(changcheStart, subjectStart !== -1 ? subjectStart : undefined)
       : '';
+
+  let subjectEnd = behaviorStart !== -1 ? behaviorStart : undefined;
+  if (dokseoStart !== -1 && dokseoStart > subjectStart && (behaviorStart === -1 || dokseoStart < behaviorStart)) {
+    subjectEnd = dokseoStart;
+  }
   const subjectText =
     subjectStart !== -1
-      ? doc.slice(subjectStart, behaviorStart !== -1 ? behaviorStart : undefined)
+      ? doc.slice(subjectStart, subjectEnd)
       : '';
   const behaviorText = behaviorStart !== -1 ? doc.slice(behaviorStart) : '';
 
@@ -180,6 +186,7 @@ function cleanRawPage(raw: string): string {
   );
 
   // 3. 페이지 넘김 시 반복되는 표 헤더
+  t = t.replace(/학\s*년\s+창\s*의\s*적\s+체\s*험\s*활\s*동\s*상\s*황\s+영\s*역\s+시\s*간\s+특\s*기\s*사\s*항/g, ' ');
   t = t.replace(/학년\s+창의적\s+체험활동상황\s+영역\s+시간\s+특기사항/g, ' ');
   t = t.replace(/과\s*목\s+세\s*부\s*능\s*력\s+및\s+특\s*기\s*사\s*항/g, ' 과목세특헤더 ');
   t = t.replace(/학\s*년\s+행\s*동\s*특\s*성\s+및\s+종\s*합\s*의\s*견/g, ' 행특헤더 ');
@@ -211,6 +218,17 @@ function fixKerning(text: string): string {
       return t;
     })
     .join(' ');
+}
+
+/**
+ * 창체 기본 활동명 추출 (자율활동, 동아리활동, 진로활동, 봉사활동)
+ */
+function getBaseChangcheType(subject: string): string {
+  if (subject.includes('자율활동')) return '자율활동';
+  if (subject.includes('동아리활동')) return '동아리활동';
+  if (subject.includes('진로활동')) return '진로활동';
+  if (subject.includes('봉사활동')) return '봉사활동';
+  return subject;
 }
 
 /**
@@ -272,6 +290,9 @@ function parseChangcheSection(text: string, records: StudentRecordItem[]) {
       subjectName += ` [${cur.hours}시간]`;
     }
 
+    // 끝부분에 묻어나는 표 잔여 헤더('학년') 정리
+    content = content.replace(/(?:\s+학년)+$/, '').trim();
+
     if (content.length > 10) {
       rawItems.push({
         grade: currentGrade,
@@ -282,20 +303,26 @@ function parseChangcheSection(text: string, records: StudentRecordItem[]) {
     }
   }
 
-  // 페이지 넘김으로 동일 학년/활동이 나뉜 경우(예: 2학년 자율활동) 문장 자연스럽게 봉합
+  // 페이지 넘김으로 동일 학년/활동이 나뉜 경우 문장 자연스럽게 봉합
   for (let i = 0; i < rawItems.length; i++) {
     const item = rawItems[i];
     const prev = records[records.length - 1];
-    if (
+    const isSameActivity =
       prev &&
       prev.grade === item.grade &&
       prev.type === item.type &&
-      prev.subject === item.subject
-    ) {
+      (prev.subject === item.subject || getBaseChangcheType(prev.subject) === getBaseChangcheType(item.subject));
+
+    if (isSameActivity) {
+      // 세부정보(동아리명, 희망분야 등)가 더 풍부한 제목을 유지
+      if (item.subject.length > prev.subject.length) {
+        prev.subject = item.subject;
+      }
       const combinedText = `${prev.text} ${item.text}`.trim();
       const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combinedText);
       prev.text = textWithHighlights;
       prev.highlightSpans = highlightSpans;
+      prev.tags = extractKeywordsSimple(combinedText);
     } else {
       const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(item.text);
       records.push({
@@ -331,14 +358,19 @@ function parseSubjectSection(text: string, records: StudentRecordItem[]) {
     gMatches.push({ grade: `${gm[1]}학년`, index: gm.index });
   }
 
-  for (let i = 0; i < gMatches.length; i++) {
-    const curG = gMatches[i];
-    const start = curG.index;
-    const end = i < gMatches.length - 1 ? gMatches[i + 1].index : cleanSub.length;
-    gradeBlocks.push({
-      grade: curG.grade,
-      text: cleanSub.slice(start, end),
-    });
+  // 만약 [1학년] 표기가 없는 비표준 문서일 경우 전체를 단일 블록으로 처리
+  if (gMatches.length === 0) {
+    gradeBlocks.push({ grade: '공통', text: cleanSub });
+  } else {
+    for (let i = 0; i < gMatches.length; i++) {
+      const curG = gMatches[i];
+      const start = curG.index;
+      const end = i < gMatches.length - 1 ? gMatches[i + 1].index : cleanSub.length;
+      gradeBlocks.push({
+        grade: curG.grade,
+        text: cleanSub.slice(start, end),
+      });
+    }
   }
 
   for (const gb of gradeBlocks) {
@@ -358,7 +390,10 @@ function parseSubjectSection(text: string, records: StudentRecordItem[]) {
 
     let m;
     while ((m = subRegex.exec(blockText)) !== null) {
-      const rawName = m[2].trim();
+      let rawName = m[2].trim();
+      // 머리글에 잔여 헤더('특기사항', '기사항', '항')가 붙은 경우 정밀 정제
+      rawName = rawName.replace(/^(?:특기사항|기사항|항)\s*/, '').trim();
+
       if (
         !['비고', '성명', '특기사항', '이수학점', '해당 사항 없음', '구분'].includes(rawName) &&
         rawName.length <= 15
@@ -369,6 +404,26 @@ function parseSubjectSection(text: string, records: StudentRecordItem[]) {
           subject: rawName,
           fullMatch: m[0],
         });
+      }
+    }
+
+    // 첫 번째 매치 이전에 앞선 과목의 이어짐 텍스트가 있다면 이전 과목에 봉합
+    if (matches.length > 0 && matches[0].index > 0) {
+      const prefixText = blockText
+        .slice(0, matches[0].index)
+        .replace(/과목세특헤더/g, ' ')
+        .replace(/해당\s*사항\s*없음/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
+      if (prefixText.length > 15 && records.length > 0) {
+        const prev = records[records.length - 1];
+        if (prev && prev.type === '교과학습발달') {
+          const combined = `${prev.text} ${prefixText}`.trim();
+          const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combined);
+          prev.text = textWithHighlights;
+          prev.highlightSpans = highlightSpans;
+        }
       }
     }
 
@@ -426,14 +481,15 @@ function parseBehaviorSection(text: string, records: StudentRecordItem[]) {
     const cur = matches[i];
     const start = cur.index + cur.fullMatch.length;
     const end = i < matches.length - 1 ? matches[i + 1].index : text.length;
-    const content = text
+    let content = text
       .slice(start, end)
       .replace(/행특헤더/g, ' ')
+      .replace(/\s+[123]\s*$/, '') // 끝에 붙은 다음 학년 번호 잔여물 제거
       .replace(/\s{2,}/g, ' ')
       .trim();
 
     if (content.length > 15 && !['해당 사항 없음', 'ㄱ'].includes(content)) {
-      // 페이지 넘김으로 1학년 행특이 나뉜 경우 봉합
+      // 페이지 넘김으로 동일 학년 행특이 나뉜 경우 봉합
       const prev = records[records.length - 1];
       if (prev && prev.grade === cur.grade && prev.type === '행동특성및종합의견') {
         const combinedText = `${prev.text} ${content}`.trim();
