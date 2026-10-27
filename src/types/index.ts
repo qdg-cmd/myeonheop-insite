@@ -39,6 +39,7 @@ export interface StudentProfile {
   createdAt: string;
   records: StudentRecordItem[];
   questions: QuestionItem[];
+  customKeywords?: string[];
 }
 
 export interface ApiKeys {

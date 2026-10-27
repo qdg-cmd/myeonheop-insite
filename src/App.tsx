@@ -79,6 +79,7 @@ export function App() {
           interviewType: string;
           records: StudentRecordItem[];
           includeCommonQuestions?: boolean;
+          customKeywords?: string[];
         }
       | Array<{
           name: string;
@@ -87,6 +88,7 @@ export function App() {
           interviewType: string;
           records: StudentRecordItem[];
           includeCommonQuestions?: boolean;
+          customKeywords?: string[];
         }>
   ) => {
     const list = Array.isArray(inputData) ? inputData : [inputData];
@@ -108,6 +110,7 @@ export function App() {
             targetUniversity: item.targetUniversity,
             targetMajor: item.targetMajor,
             interviewType: item.interviewType,
+            customKeywords: item.customKeywords,
           },
           item.records,
           apiKeys,
@@ -134,6 +137,7 @@ export function App() {
           createdAt: new Date().toISOString(),
           records: item.records,
           questions: [...commonQuestions, ...generatedQuestions],
+          customKeywords: item.customKeywords,
         };
 
         await saveStudent(newProfile);

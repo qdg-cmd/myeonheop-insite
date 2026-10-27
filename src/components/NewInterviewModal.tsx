@@ -23,6 +23,7 @@ export interface StudentInputProfile {
   interviewType: string;
   records: StudentRecordItem[];
   includeCommonQuestions?: boolean;
+  customKeywords?: string[];
 }
 
 interface UploadedStudentItem {
@@ -32,6 +33,7 @@ interface UploadedStudentItem {
   targetUniversity: string;
   targetMajor: string;
   records: StudentRecordItem[];
+  customKeywordsInput?: string;
   info?: string;
   error?: string;
 }
@@ -67,6 +69,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
   const [pastedName, setPastedName] = useState('');
   const [pastedUniversity, setPastedUniversity] = useState('');
   const [pastedMajor, setPastedMajor] = useState('');
+  const [pastedCustomKeywords, setPastedCustomKeywords] = useState('');
   const [pastedText, setPastedText] = useState('');
 
   if (!isOpen) return null;
@@ -95,6 +98,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
             targetUniversity: '',
             targetMajor: '',
             records,
+            customKeywordsInput: '',
             info: `HTML 파일: ${records.length}개 세특/창체 항목 감지`,
           });
         } else {
@@ -106,6 +110,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
             targetUniversity: '',
             targetMajor: '',
             records,
+            customKeywordsInput: '',
             info: `나이스 파싱 완료: ${records.length}개 창체·세특 항목 추출`,
           });
         }
@@ -117,6 +122,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
           targetUniversity: '',
           targetMajor: '',
           records: [],
+          customKeywordsInput: '',
           error: err instanceof Error ? err.message : '파일 파싱에 실패했습니다.',
         });
       }
@@ -153,6 +159,9 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
         interviewType,
         records: item.records,
         includeCommonQuestions,
+        customKeywords: item.customKeywordsInput
+          ? item.customKeywordsInput.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
+          : undefined,
       }));
 
       await onSubmit(profilesToSubmit);
@@ -181,6 +190,9 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
           interviewType,
           records: [pastedRecord],
           includeCommonQuestions,
+          customKeywords: pastedCustomKeywords
+            ? pastedCustomKeywords.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
+            : undefined,
         },
       ]);
     }
@@ -188,7 +200,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
+      <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
           <div className="flex items-center gap-2.5">
@@ -196,14 +208,14 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-extrabold text-slate-800 text-lg">새 학생부 분석 및 면접 준비</h3>
-              <p className="text-xs text-slate-500">학생부 파일 업로드 후 대학별 맞춤 질문 생성</p>
+              <h3 className="font-extrabold text-slate-800 text-lg whitespace-nowrap">새 학생부 분석 및 면접 준비</h3>
+              <p className="text-xs text-slate-500 whitespace-nowrap">학생부 파일 업로드 후 대학별 맞춤 질문 생성</p>
             </div>
           </div>
           {!isGenerating && (
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -222,14 +234,14 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
           {/* 1단계: 지원 전형 및 옵션 설정 */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-extrabold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
+              <h4 className="text-xs font-extrabold text-blue-600 uppercase tracking-wider flex items-center gap-1.5 whitespace-nowrap">
                 <Building2 className="w-4 h-4" /> 1. 공통 전형 설정
               </h4>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">지원 전형 유형</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-stretch">
+              <div className="flex flex-col justify-between">
+                <label className="block text-xs font-bold text-slate-700 mb-1 whitespace-nowrap">지원 전형 유형</label>
                 <select
                   value={interviewType}
                   onChange={(e) => setInterviewType(e.target.value)}
@@ -249,11 +261,11 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                   className="mt-0.5 w-4 h-4 text-purple-600 rounded-md border-purple-300 focus:ring-purple-500 shrink-0 cursor-pointer"
                 />
                 <label htmlFor="includeCommonQuestions" className="cursor-pointer select-none">
-                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1 whitespace-nowrap">
                     <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
                     대학 공통 필수 질문 10선 포함
                   </span>
-                  <span className="text-[11px] text-purple-700/90 leading-relaxed block mt-0.5">
+                  <span className="text-[11px] text-purple-700/90 leading-snug block mt-0.5 break-keep">
                     자기소개, 지원동기, 학업계획 등 10문항을 질문지 맨 앞에 함께 생성합니다.
                   </span>
                 </label>
@@ -263,7 +275,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
 
           {/* 2단계: 파일 업로드 / 텍스트 입력 */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
-            <h4 className="text-xs font-extrabold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
+            <h4 className="text-xs font-extrabold text-blue-600 uppercase tracking-wider flex items-center gap-1.5 whitespace-nowrap">
               <FileText className="w-4 h-4" /> 2. 학생부 원문 업로드
             </h4>
 
@@ -272,7 +284,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('upload')}
-                className={`flex-1 py-1.5 px-3 rounded-lg transition ${
+                className={`flex-1 py-1.5 px-3 rounded-lg transition whitespace-nowrap cursor-pointer ${
                   activeTab === 'upload' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -281,7 +293,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('paste')}
-                className={`flex-1 py-1.5 px-3 rounded-lg transition ${
+                className={`flex-1 py-1.5 px-3 rounded-lg transition whitespace-nowrap cursor-pointer ${
                   activeTab === 'paste' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -298,10 +310,10 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                       <ShieldCheck className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-emerald-950">
+                      <p className="text-xs font-bold text-emerald-950 whitespace-nowrap">
                         개인정보 보호를 위해 마스킹이 필요하신가요?
                       </p>
-                      <p className="text-[11px] text-emerald-700/90 leading-tight">
+                      <p className="text-[11px] text-emerald-700/90 leading-tight whitespace-nowrap">
                         학생부의 이름·주민번호·학교명을 안전하게 가릴 수 있습니다.
                       </p>
                     </div>
@@ -347,15 +359,15 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                     <div className="p-3 bg-white group-hover:bg-blue-100 text-slate-400 group-hover:text-blue-600 rounded-2xl shadow-xs border border-slate-200 mb-3 transition">
                       <Upload className="w-6 h-6" />
                     </div>
-                    <p className="text-sm font-bold text-slate-700 mb-1">
+                    <p className="text-sm font-bold text-slate-700 mb-1 whitespace-nowrap break-keep">
                       {isDragging
                         ? '여기에 파일을 놓으시면 바로 분석됩니다!'
                         : '학생부 PDF, HTML 또는 텍스트 파일을 여기에 끌어다 놓으세요'}
                     </p>
-                    <p className="text-xs text-slate-400 mb-3">
+                    <p className="text-xs text-slate-400 mb-3 whitespace-nowrap break-keep">
                       나이스 PDF (.pdf), HTML (.html) 또는 텍스트 (.txt) 파일 지원 (여러 파일 동시 드래그 가능)
                     </p>
-                    <span className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition">
+                    <span className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition whitespace-nowrap">
                       내 컴퓨터에서 파일 선택 (다중 선택 가능)
                     </span>
                     <input
@@ -371,8 +383,8 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                 </div>
 
                 {isParsing && (
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-xs font-medium flex items-center justify-center gap-2 animate-pulse">
-                    <Sparkles className="w-4 h-4 animate-spin text-blue-600" />
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-xs font-medium flex items-center justify-center gap-2 animate-pulse whitespace-nowrap">
+                    <Sparkles className="w-4 h-4 animate-spin text-blue-600 shrink-0" />
                     <span>파일을 정밀 분석하고 학생 성명 및 세특을 추출 중입니다…</span>
                   </div>
                 )}
@@ -381,7 +393,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                 {uploadedList.length > 0 && (
                   <div className="space-y-3 pt-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                      <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 whitespace-nowrap">
                         <FileText className="w-4 h-4 text-blue-600" />
                         업로드된 학생 목록 ({validItems.length}명 정상
                         {errorItems.length > 0 && (
@@ -389,7 +401,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                         )}
                         )
                       </span>
-                      <label className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 text-xs font-semibold rounded-lg cursor-pointer transition flex items-center gap-1">
+                      <label className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 text-xs font-semibold rounded-lg cursor-pointer transition flex items-center gap-1 whitespace-nowrap shrink-0">
                         <Plus className="w-3.5 h-3.5" /> 파일 더 추가
                         <input
                           type="file"
@@ -420,7 +432,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleRemoveItem(item.id)}
-                                className="p-1 text-rose-400 hover:text-rose-700 transition"
+                                className="p-1 text-rose-400 hover:text-rose-700 transition cursor-pointer"
                                 title="목록에서 제거"
                               >
                                 <X className="w-4 h-4" />
@@ -435,19 +447,19 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                             className="p-4 bg-slate-50/70 border border-slate-200/90 rounded-2xl space-y-3 hover:border-blue-300 transition"
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-nowrap overflow-hidden">
                                 <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                                <span className="text-xs font-bold text-slate-800 truncate max-w-[220px] sm:max-w-[340px]">
+                                <span className="text-xs font-bold text-slate-800 truncate">
                                   {item.file?.name}
                                 </span>
-                                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
                                   {item.records.length}개 세특/창체
                                 </span>
                               </div>
                               <button
                                 type="button"
                                 onClick={() => handleRemoveItem(item.id)}
-                                className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-slate-100 transition"
+                                className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer shrink-0"
                                 title="이 학생부 제거"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -457,7 +469,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                             {/* 학생별 정보 입력란 (학생 이름, 지원 대학, 지원 학과) */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                               <div>
-                                <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                                <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1 whitespace-nowrap">
                                   <User className="w-3 h-3 text-slate-400" /> 학생 이름
                                 </label>
                                 <input
@@ -469,7 +481,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                                 />
                               </div>
                               <div>
-                                <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                                <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1 whitespace-nowrap">
                                   <Building2 className="w-3 h-3 text-slate-400" /> 지원 대학
                                 </label>
                                 <input
@@ -481,7 +493,9 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                                 />
                               </div>
                               <div>
-                                <label className="block text-[11px] font-bold text-slate-600 mb-1">지원 학과 / 전공</label>
+                                <label className="block text-[11px] font-bold text-slate-600 mb-1 whitespace-nowrap">
+                                  지원 학과 / 전공
+                                </label>
                                 <input
                                   type="text"
                                   value={item.targetMajor}
@@ -490,6 +504,23 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                                   className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400 font-medium"
                                 />
                               </div>
+                            </div>
+
+                            {/* 집중 탐구 키워드 (선택 입력란 - 이상적인 절충안) */}
+                            <div className="pt-0.5">
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1 whitespace-nowrap">
+                                  <Sparkles className="w-3 h-3 text-amber-500 shrink-0" /> 집중 탐구 키워드 (선택 입력)
+                                </label>
+                                <span className="text-[10px] text-slate-400 whitespace-nowrap">쉼표(,)로 구분</span>
+                              </div>
+                              <input
+                                type="text"
+                                value={item.customKeywordsInput || ''}
+                                onChange={(e) => handleUpdateItem(item.id, { customKeywordsInput: e.target.value })}
+                                placeholder="예: 오가노이드, 생성형AI, 페로브스카이트 (입력 시 해당 주제 우선 질문 생성)"
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400 font-medium"
+                              />
                             </div>
                           </div>
                         );
@@ -502,7 +533,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1 whitespace-nowrap">
                       <User className="w-3 h-3 text-slate-400" /> 학생 이름
                     </label>
                     <input
@@ -514,7 +545,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1 whitespace-nowrap">
                       <Building2 className="w-3 h-3 text-slate-400" /> 지원 대학
                     </label>
                     <input
@@ -526,7 +557,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">지원 학과 / 전공</label>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1 whitespace-nowrap">지원 학과 / 전공</label>
                     <input
                       type="text"
                       value={pastedMajor}
@@ -535,6 +566,23 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
                       className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400"
                     />
                   </div>
+                </div>
+
+                {/* 붙여넣기 탭 집중 탐구 키워드 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1 whitespace-nowrap">
+                      <Sparkles className="w-3 h-3 text-amber-500 shrink-0" /> 집중 탐구 키워드 (선택 입력)
+                    </label>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">쉼표(,)로 구분</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={pastedCustomKeywords}
+                    onChange={(e) => setPastedCustomKeywords(e.target.value)}
+                    placeholder="예: 오가노이드, 생성형AI, 페로브스카이트 (입력 시 해당 주제 우선 질문 생성)"
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 placeholder:text-slate-400 font-medium"
+                  />
                 </div>
 
                 <div>
@@ -553,10 +601,10 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
           {isGenerating && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl space-y-2.5 animate-pulse">
               <div className="flex items-center justify-between text-xs font-bold text-blue-900">
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-blue-600 animate-spin" /> {generationStage}
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <Sparkles className="w-4 h-4 text-blue-600 animate-spin shrink-0" /> {generationStage}
                 </span>
-                <span>AI 면접 질문 생성 중…</span>
+                <span className="whitespace-nowrap">AI 면접 질문 생성 중…</span>
               </div>
               <div className="w-full bg-blue-200 h-2 rounded-full overflow-hidden">
                 <div className="bg-blue-600 h-full w-2/3 animate-pulse rounded-full" />
@@ -571,7 +619,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
             type="button"
             disabled={isGenerating}
             onClick={onClose}
-            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200/60 rounded-xl transition"
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200/60 rounded-xl transition cursor-pointer whitespace-nowrap"
           >
             닫기
           </button>
@@ -584,9 +632,9 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
               (activeTab === 'paste' && !pastedText.trim())
             }
             onClick={handleStartAnalysis}
-            className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 rounded-xl shadow-xs transition shadow-blue-500/20"
+            className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 rounded-xl shadow-xs transition shadow-blue-500/20 whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-4 h-4 shrink-0" />
             {isGenerating
               ? '질문 생성 진행 중…'
               : activeTab === 'upload' && validItems.length > 1

@@ -5,7 +5,7 @@ import { generateStandardRuleQuestions } from './ruleEngine';
  * AI 질문 생성 함수 (10개씩 묶어서 배치 호출)
  */
 export async function generateInterviewQuestions(
-  profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'>,
+  profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'> & { customKeywords?: string[] },
   records: StudentRecordItem[],
   apiKeys: ApiKeys,
   onProgress?: (stage: string) => void
