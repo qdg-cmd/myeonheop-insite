@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { StudentRecordItem } from '../types';
 import { Tag, BookOpen, Layers } from 'lucide-react';
+import { sanitizeHtml } from '../lib/sanitize';
 
 interface RecordTableProps {
   records: StudentRecordItem[];
@@ -145,10 +146,10 @@ export const RecordTable: React.FC<RecordTableProps> = ({
 
                 {/* 본문 및 태그 */}
                 <td className="px-4 py-4 text-slate-800 leading-relaxed text-xs sm:text-sm break-keep align-top">
-                  {/* HTML 형광펜 렌더링 */}
+                  {/* HTML 형광펜 렌더링 (XSS 방어 새니타이저 적용) */}
                   <div
                     className="student-record-content"
-                    dangerouslySetInnerHTML={{ __html: item.text }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.text) }}
                   />
 
                   {/* AI 추출 역량 태그 */}

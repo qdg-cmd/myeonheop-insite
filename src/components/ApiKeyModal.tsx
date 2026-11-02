@@ -96,7 +96,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 <a
                   href="https://aistudio.google.com/apikey"
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium"
                 >
                   무료 키 발급받기 <ExternalLink className="w-3 h-3" />
@@ -123,7 +123,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 <a
                   href="https://platform.openai.com/api-keys"
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium"
                 >
                   키 관리 페이지 <ExternalLink className="w-3 h-3" />

@@ -1,5 +1,6 @@
 import { ApiKeys, QuestionItem, StudentProfile, StudentRecordItem } from '../types';
 import { generateStandardRuleQuestions } from './ruleEngine';
+import { maskPersonalInfo } from './masking';
 
 /**
  * AI 질문 생성 함수 (10개씩 묶어서 배치 호출)
@@ -146,12 +147,14 @@ async function callGeminiBatch(
 ): Promise<QuestionItem[]> {
   const models = ['gemini-flash-lite-latest', 'gemini-2.0-flash-lite', 'gemini-1.5-flash'];
   const contextSummary = batchRecords
-    .map(
-      (r, i) =>
-        `[${i + 1}] ${r.grade} ${r.subject} (${r.type})\n원문: ${r.text.replace(/<[^>]+>/g, '')}\n하이라이트: ${
-          r.highlightSpans?.join(' / ') || '없음'
-        }\n태그: ${r.tags.join(', ')}`
-    )
+    .map((r, i) => {
+      const cleanText = r.text.replace(/<[^>]+>/g, '');
+      // 개인정보 보호: 외부 AI 전송 전 이름, 학교명, 주민번호 자동 마스킹
+      const { maskedText } = maskPersonalInfo(cleanText, profile.name);
+      return `[${i + 1}] ${r.grade} ${r.subject} (${r.type})\n원문: ${maskedText}\n하이라이트: ${
+        r.highlightSpans?.join(' / ') || '없음'
+      }\n태그: ${r.tags.join(', ')}`;
+    })
     .join('\n\n');
 
   const systemPrompt = `
@@ -186,11 +189,14 @@ async function callGeminiBatch(
 
   for (const model of models) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify({
           contents: [
             {
@@ -245,7 +251,11 @@ async function callOpenAiApi(
   onProgress?.('OpenAI GPT-4o에 질문 생성 요청 중…');
 
   const contextSummary = records
-    .map((r, i) => `[${i + 1}] ${r.grade} ${r.subject}: ${r.text.replace(/<[^>]+>/g, '')}`)
+    .map((r, i) => {
+      const cleanText = r.text.replace(/<[^>]+>/g, '');
+      const { maskedText } = maskPersonalInfo(cleanText, profile.name);
+      return `[${i + 1}] ${r.grade} ${r.subject}: ${maskedText}`;
+    })
     .join('\n\n');
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
