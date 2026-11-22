@@ -222,7 +222,7 @@ export function generateDocxBlob(profile: StudentProfile, starredOnly: boolean =
     paras.push({
       style: 'Normal',
       runs: [
-        { t: `Q. ${q.question}`, b: true, sz: 24, color: '111827' },
+        { t: `Q. ${q.question.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim()}`, b: true, sz: 24, color: '111827' },
       ],
       keepNext: true,
       spacingAfter: 80,
@@ -234,7 +234,7 @@ export function generateDocxBlob(profile: StudentProfile, starredOnly: boolean =
         style: 'Normal',
         runs: [
           { t: `[생기부 근거 원문] `, b: true, sz: 20, color: 'B45309' },
-          { t: `"${q.highlightText}"`, italic: true, sz: 20, color: '92400E' },
+          { t: `"${q.highlightText.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim()}"`, italic: true, sz: 20, color: '92400E' },
         ],
         indentLeft: 240,
         spacingAfter: 80,

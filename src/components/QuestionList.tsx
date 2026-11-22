@@ -15,6 +15,8 @@ import {
   Star,
 } from 'lucide-react';
 
+const cleanOriginalText = (s?: string) => (s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim() : '');
+
 interface QuestionListProps {
   questions: QuestionItem[];
   onUpdateQuestion: (updated: QuestionItem) => void;
@@ -365,14 +367,14 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     <h4 className={`text-sm sm:text-base font-bold leading-snug break-keep ${
                       q.completed ? 'text-slate-500 line-through' : 'text-slate-900'
                     }`}>
-                      {q.question}
+                      {cleanOriginalText(q.question)}
                     </h4>
 
                     {/* 근거 문장 미리보기 */}
                     {q.highlightText && !isExpanded && (
                       <p className="text-xs text-slate-500 truncate flex items-center gap-1 pt-0.5">
                         <Bookmark className="w-3 h-3 text-amber-500 shrink-0" />
-                        <span className="font-semibold text-slate-600">근거:</span> "{q.highlightText}"
+                        <span className="font-semibold text-slate-600">근거:</span> "{cleanOriginalText(q.highlightText)}"
                       </p>
                     )}
                   </div>
@@ -388,7 +390,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                       <span className="font-bold block mb-0.5 flex items-center gap-1 text-amber-800">
                         <Bookmark className="w-3.5 h-3.5" /> 생기부 근거 문장
                       </span>
-                      "{q.highlightText}"
+                      "{cleanOriginalText(q.highlightText)}"
                     </div>
                   )}
 

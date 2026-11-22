@@ -3,6 +3,23 @@ import { CONCEPTS, FIELDS, TAIL } from './v4Data';
 import { PastExamData, getPastExamData } from './pastExamLoader';
 
 // ============================================================
+// 0. HTML 태그 및 엔티티 제거 유틸리티
+// ============================================================
+export function stripHtmlTags(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// ============================================================
 // 1. 한국어 음운 및 조사 자동 처리 (josa)
 // ============================================================
 const HANGUL = /[가-힣]/;
@@ -131,7 +148,10 @@ export const STOP = new Set([
   '종합적', '전반적', '다각적', '비판적', '논리적', '실질적', '실질', '사례', '예시', '자료',
   '보고서', '에세이', '소논문', '소감', '느낀점', '깨달은점', '동기', '계기', '배경', '개인',
   '공동체', '사회', '이후', '당시', '직후', '매우', '가장', '서로', '함께', '모두',
-  '원리', '개념', '이론', '구조'
+  '원리', '개념', '이론', '구조',
+  // HTML 태그 및 영문 노이즈 원천 차단
+  'span', 'class', 'highlight', 'div', 'mark', 'style', 'table', 'tbody', 'tr', 'td', 'br', 'p',
+  'strong', 'em', 'img', 'src', 'href', 'html', 'body'
 ]);
 
 export const CONCEPT_EXCLUDE = new Set([
@@ -144,7 +164,10 @@ export const CONCEPT_EXCLUDE = new Set([
   '적용', '도출', '성실', '열정', '학습', '공부', '수업', '학교', '학생', '친구',
   '기업', '전략', '사회', '경제', '문화', '인간', '정책', '시장', '역사', '국가',
   '세계', '지역', '교육', '소비', '개발', '기술', '산업', '경영',
-  '학급', '모둠', '동아리', '부원', '급우', '선생님'
+  '학급', '모둠', '동아리', '부원', '급우', '선생님',
+  // HTML 태그 및 영문 노이즈 원천 차단
+  'span', 'class', 'highlight', 'div', 'mark', 'style', 'table', 'tbody', 'tr', 'td', 'br', 'p',
+  'strong', 'em', 'img', 'src', 'href', 'html', 'body', 'span class', 'class='
 ]);
 
 // ============================================================
@@ -264,6 +287,8 @@ export function findConcepts(t: string, dynamicKeywords?: KeywordScore[] | strin
     const score = (typeof dk === 'object' && dk.score) ? dk.score : 0;
     const tf = (typeof dk === 'object' && dk.tf) ? dk.tf : 1;
     if (!term || term.length < 2) return false;
+    if (/^(?:span|class|highlight|div|mark|style|table|tbody|tr|td|br|p|html|body)$/i.test(term)) return false;
+    if (/<[^>]*>/.test(term)) return false;
     if (isPredicateOrModifierToken(term) || STOP.has(term) || CONCEPT_EXCLUDE.has(term)) return false;
     return (score >= 1.35 || tf >= 2);
   });
@@ -1401,7 +1426,7 @@ export function buildRuleCandidatePool(
   const flds = fieldsOf(M);
   const fld = flds[0] || null;
 
-  // 1. StudentRecordItem[]을 구조화된 SentenceItem[] 및 recs로 변환
+  // 1. StudentRecordItem[]을 구조화된 SentenceItem[] 및 recs로 변환 (모든 HTML 태그 완전 제거)
   const recs = records.map((r, ri) => {
     let sec: '교과' | '창체' | '행특' | '독서' | '기타' = '교과';
     if (r.type === '창의적 체험활동' || /진로|자율|동아리|봉사/.test(r.subject)) sec = '창체';
@@ -1412,6 +1437,7 @@ export function buildRuleCandidatePool(
     const grade = gMatch ? +gMatch[1] : 1;
     const area = sec === '창체' ? r.subject : undefined;
     const subj = sec === '교과' ? r.subject : undefined;
+    const cleanText = stripHtmlTags(r.text || '');
 
     return {
       id: r.id || `rec-${ri}`,
@@ -1419,7 +1445,7 @@ export function buildRuleCandidatePool(
       grade,
       area,
       subj,
-      text: r.text
+      text: cleanText
     };
   });
 
@@ -1428,12 +1454,15 @@ export function buildRuleCandidatePool(
   recs.forEach((r) => {
     let m: RegExpExecArray | null;
     while ((m = qre.exec(r.text))) {
-      quotesList.push(m[1].trim());
+      const q = stripHtmlTags(m[1]).trim();
+      if (q.length >= 2 && !/^(?:span|class|highlight|div|mark|style|table|tbody|tr|td|br|p|html|body)$/i.test(q)) {
+        quotesList.push(q);
+      }
     }
   });
 
   const kwObjects = extractKeywordsAdvanced(recs, quotesList);
-  const recTxt = records.map((r) => r.text).join(' ');
+  const recTxt = recs.map((r) => r.text).join(' ');
 
   const validKeywords = kwObjects
     .filter((k) => k.score >= 1.35 && !CONCEPT_EXCLUDE.has(k.term))
@@ -1466,9 +1495,10 @@ export function buildRuleCandidatePool(
 
   const rawSents: SentenceItem[] = [];
   recs.forEach((r, ri) => {
-    const parts = r.text.replace(/([가-힣)'’"”])\.\s*(?=[가-힣A-Za-z'‘"“([<0-9])/g, '$1.\n').split('\n');
+    const cleanText = stripHtmlTags(r.text || '');
+    const parts = cleanText.replace(/([가-힣)'’"”])\.\s*(?=[가-힣A-Za-z'‘"“([<0-9])/g, '$1.\n').split('\n');
     parts.forEach((p, pi) => {
-      const pt = p.trim();
+      const pt = stripHtmlTags(p).trim();
       if (pt.length >= 12) {
         rawSents.push({
           sec: r.sec,
@@ -1532,7 +1562,7 @@ export function buildRuleCandidatePool(
           srcBadge: '[학년·과목 연계]',
           catGroup: 'record',
           text: `${lab1}에서 다룬 ‘${kw}’ 주제를 ${lab2}에서 한 단계 더 확장해 탐구했는데, 두 과목의 활동을 연결하게 된 문제의식과 학업적 성장을 설명해 주세요.`,
-          rtext: `${s1.text} / ${s2.text}`,
+          rtext: `${stripHtmlTags(s1.text)} / ${stripHtmlTags(s2.text)}`,
           rlab: `${lab1} ➔ ${lab2}`,
           sref: s2,
           ans: `${josa(`‘${kw}’`, '을/를')} 중심으로 ${lab1}에서 기초 원리를 탐구한 뒤, ${lab2}에서 심화 응용 과제로 확장했습니다. 이 연계를 통해 단순 지식 습득에 머물지 않고 학문 간 융합적 사고력과 자기주도적 연구 역량을 키울 수 있었습니다.`,
@@ -1553,7 +1583,7 @@ export function buildRuleCandidatePool(
           srcBadge: '[학년·과목 연계]',
           catGroup: 'record',
           text: `${lab1}의 ‘${kw}’ 탐구에서 마주한 한계나 의문점을 ${lab2}에서 어떻게 발전시켜 해결했는지 구체적인 계기를 말씀해 주세요.`,
-          rtext: `${s1.text} / ${s2.text}`,
+          rtext: `${stripHtmlTags(s1.text)} / ${stripHtmlTags(s2.text)}`,
           rlab: `${lab1} ➔ ${lab2}`,
           sref: s2,
           ans: `${lab1} 탐구 당시 [한계나 궁금했던 점]이 남아있었습니다. 이를 해결하기 위해 ${lab2}에서 [새로운 접근법이나 도구]를 도입하여 해결했으며, 이 과정에서 전공 분야에 대한 문제 해결력을 확립했습니다.`,
@@ -1568,7 +1598,7 @@ export function buildRuleCandidatePool(
   // [2] Pure Student Record Candidates (from candidatesFrom)
   sents.filter((s) => !s.skip).slice(0, 80).forEach((s) => {
     candidatesFrom(s, ctx).forEach((q) => {
-      q.rtext = s.text;
+      q.rtext = stripHtmlTags(s.text);
       q.rlab = recordLabel(s);
       q.sref = s;
       q.catGroup = 'record';
@@ -1622,7 +1652,7 @@ export function buildRuleCandidatePool(
           srcBadge: `[${univShort} 예시화법 융합]`,
           catGroup: 'fusion',
           text: fusedText,
-          rtext: matchSent.text,
+          rtext: stripHtmlTags(matchSent.text),
           rlab: recordLabel(matchSent),
           sref: matchSent,
           ans: matchSent.concepts[0] ? matchSent.concepts[0].def : null,
@@ -1945,8 +1975,8 @@ export function generateStandardRuleQuestions(
         type: q.tplId === 'pres' || q.type === '오차분석' || q.type === '개념한계' ? 'pressure' : (q.type === '종단연계' || q.catGroup === 'fusion' ? 'deep' : 'record'),
         grade: q.sref?.grade ? `${q.sref.grade}학년` : undefined,
         subject: q.sref?.subj || q.sref?.area,
-        highlightText: q.rtext,
-        question: q.text,
+        highlightText: stripHtmlTags(q.rtext || ''),
+        question: stripHtmlTags(q.text || ''),
         intent: q.tip || `${sec.name} 검증 및 탐구 깊이 평가`,
         points: q.ans ? [q.ans] : (q.points && q.points.length ? q.points : ['핵심 개념과 자신의 탐구 역할을 두괄식으로 설명하세요.']),
         followUps: q.tails && q.tails.length ? q.tails : ['이 활동을 진행하면서 가장 크게 성장했다고 느낀 점은 무엇인가요?'],
@@ -2000,8 +2030,8 @@ export function generateAdditionalRuleQuestions(
       type: cand.tplId === 'pres' ? 'pressure' : (cand.type === '종단연계' || cand.catGroup === 'fusion' ? 'deep' : 'record'),
       grade: cand.sref?.grade ? `${cand.sref.grade}학년` : undefined,
       subject: cand.sref?.subj || cand.sref?.area,
-      highlightText: cand.rtext,
-      question: cand.text,
+      highlightText: stripHtmlTags(cand.rtext || ''),
+      question: stripHtmlTags(cand.text || ''),
       intent: cand.tip || `${candComp} 추가 검증 문항`,
       points: cand.ans ? [cand.ans] : (cand.points || ['핵심 키워드를 중심으로 답변하세요.']),
       followUps: cand.tails || [],
@@ -2062,8 +2092,8 @@ export function generateSubject3Questions(
         type: t.type,
         grade: gradeName,
         subject: subjectName,
-        highlightText: c.rtext,
-        question: c.text,
+        highlightText: stripHtmlTags(c.rtext || ''),
+        question: stripHtmlTags(c.text || ''),
         intent: c.tip || `${subjectName} 과목 ${t.label} 평가`,
         points: c.ans ? [c.ans] : (c.points || ['핵심 키워드를 중심으로 답변하세요.']),
         followUps: c.tails || [],

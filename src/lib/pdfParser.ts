@@ -318,7 +318,9 @@ function parseChangcheSection(text: string, records: StudentRecordItem[]) {
       if (item.subject.length > prev.subject.length) {
         prev.subject = item.subject;
       }
-      const combinedText = `${prev.text} ${item.text}`.trim();
+      const cleanPrev = (prev.text || '').replace(/<[^>]+>/g, '').trim();
+      const cleanItem = (item.text || '').replace(/<[^>]+>/g, '').trim();
+      const combinedText = `${cleanPrev} ${cleanItem}`.trim();
       const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combinedText);
       prev.text = textWithHighlights;
       prev.highlightSpans = highlightSpans;
@@ -419,7 +421,9 @@ function parseSubjectSection(text: string, records: StudentRecordItem[]) {
       if (prefixText.length > 15 && records.length > 0) {
         const prev = records[records.length - 1];
         if (prev && prev.type === '교과학습발달') {
-          const combined = `${prev.text} ${prefixText}`.trim();
+          const cleanPrev = (prev.text || '').replace(/<[^>]+>/g, '').trim();
+          const cleanPrefix = (prefixText || '').replace(/<[^>]+>/g, '').trim();
+          const combined = `${cleanPrev} ${cleanPrefix}`.trim();
           const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combined);
           prev.text = textWithHighlights;
           prev.highlightSpans = highlightSpans;
@@ -492,7 +496,9 @@ function parseBehaviorSection(text: string, records: StudentRecordItem[]) {
       // 페이지 넘김으로 동일 학년 행특이 나뉜 경우 봉합
       const prev = records[records.length - 1];
       if (prev && prev.grade === cur.grade && prev.type === '행동특성및종합의견') {
-        const combinedText = `${prev.text} ${content}`.trim();
+        const cleanPrev = (prev.text || '').replace(/<[^>]+>/g, '').trim();
+        const cleanContent = (content || '').replace(/<[^>]+>/g, '').trim();
+        const combinedText = `${cleanPrev} ${cleanContent}`.trim();
         const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combinedText);
         prev.text = textWithHighlights;
         prev.highlightSpans = highlightSpans;
@@ -546,7 +552,8 @@ function autoHighlightKeySentence(text: string): {
   textWithHighlights: string;
   highlightSpans: string[];
 } {
-  const sentences = text
+  const cleanText = (text || '').replace(/<[^>]+>/g, '').trim();
+  const sentences = cleanText
     .split(/(?<=[.?!])\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length >= 20 && s.length <= 160);
@@ -568,9 +575,9 @@ function autoHighlightKeySentence(text: string): {
   scored.sort((a, b) => b.score - a.score);
   const bestSentence = scored.find((s) => s.score >= 2)?.sentence;
 
-  if (bestSentence && text.includes(bestSentence)) {
+  if (bestSentence && cleanText.includes(bestSentence)) {
     return {
-      textWithHighlights: text.replace(
+      textWithHighlights: cleanText.replace(
         bestSentence,
         `<span class='highlight'>${bestSentence}</span>`
       ),
@@ -578,7 +585,7 @@ function autoHighlightKeySentence(text: string): {
     };
   }
 
-  return { textWithHighlights: text, highlightSpans: [] };
+  return { textWithHighlights: cleanText, highlightSpans: [] };
 }
 
 function extractKeywordsSimple(text: string): string[] {

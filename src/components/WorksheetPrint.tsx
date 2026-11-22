@@ -6,6 +6,8 @@ interface WorksheetPrintProps {
   starredOnly?: boolean;
 }
 
+const cleanText = (s?: string) => (s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim() : '');
+
 export const WorksheetPrint: React.FC<WorksheetPrintProps> = ({ profile, starredOnly = false }) => {
   const currentDate = new Date().toLocaleDateString('ko-KR', {
     year: 'numeric',
@@ -102,14 +104,14 @@ export const WorksheetPrint: React.FC<WorksheetPrintProps> = ({ profile, starred
 
             {/* 질문 본문 */}
             <h3 className="font-bold text-sm sm:text-base leading-snug text-gray-900">
-              Q: {q.question}
+              Q: {cleanText(q.question)}
             </h3>
 
             {/* 생기부 근거 원문 */}
             {q.highlightText && (
               <div className="text-xs text-amber-950 bg-amber-50/60 p-2.5 rounded border border-amber-200/70 leading-relaxed">
                 <span className="font-bold text-amber-900 block mb-0.5">■ 생기부 근거 원문:</span>
-                "{q.highlightText}"
+                "{cleanText(q.highlightText)}"
               </div>
             )}
 
