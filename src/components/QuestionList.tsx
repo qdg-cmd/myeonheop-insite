@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { QuestionItem, CompetencyType } from '../types';
 import {
-  HelpCircle,
   Target,
   Lightbulb,
   CornerDownRight,
@@ -278,6 +277,19 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     )}
                     {getCompetencyBadge(q.competency)}
                     {getTypeBadge(q.type)}
+                    {q.srcBadge && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border whitespace-nowrap shrink-0 ${
+                        q.srcBadge.includes('합격선배')
+                          ? 'text-purple-800 bg-purple-50 border-purple-200'
+                          : q.srcBadge.includes('연계')
+                          ? 'text-teal-800 bg-teal-50 border-teal-200'
+                          : q.srcBadge.includes('융합')
+                          ? 'text-blue-800 bg-blue-50 border-blue-200'
+                          : 'text-indigo-800 bg-indigo-50 border-indigo-200'
+                      }`}>
+                        {q.srcBadge.replace(/^\[+|\]+$/g, '')}
+                      </span>
+                    )}
                     {q.subject && (
                       <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md whitespace-nowrap shrink-0">
                         {q.grade ? `${q.grade} ` : ''}{q.subject}
@@ -390,20 +402,31 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     </p>
                   </div>
 
-                  {/* 답변 포인트 */}
+                  {/* 답변 포인트 또는 합격선배 실전 답변 */}
                   {q.points && q.points.length > 0 && (
                     <div className="space-y-1.5">
-                      <span className="font-bold text-slate-700 flex items-center gap-1.5 text-xs text-emerald-700">
-                        <Lightbulb className="w-4 h-4 text-amber-500" /> 모범 답변 핵심 키워드 & 포인트
+                      <span className={`font-bold flex items-center gap-1.5 text-xs ${
+                        q.ansLabel && q.ansLabel.includes('선배') ? 'text-purple-700' : 'text-emerald-700'
+                      }`}>
+                        <Lightbulb className={`w-4 h-4 ${
+                          q.ansLabel && q.ansLabel.includes('선배') ? 'text-purple-500' : 'text-amber-500'
+                        }`} />
+                        {q.ansLabel || '모범 답변 핵심 키워드 & 포인트'}
                       </span>
-                      <ul className="space-y-1.5 bg-white p-3 rounded-xl border border-slate-200">
+                      <div className={`p-3 rounded-xl border leading-relaxed space-y-1.5 ${
+                        q.ansLabel && q.ansLabel.includes('선배')
+                          ? 'bg-purple-50/60 border-purple-200 text-purple-950 font-medium'
+                          : 'bg-white border-slate-200 text-slate-700'
+                      }`}>
                         {q.points.map((pt, pIdx) => (
-                          <li key={pIdx} className="flex items-start gap-2 text-xs text-slate-700 leading-relaxed">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0" />
-                            <span>{pt}</span>
-                          </li>
+                          <div key={pIdx} className="flex items-start gap-2 text-xs leading-relaxed">
+                            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                              q.ansLabel && q.ansLabel.includes('선배') ? 'bg-purple-500' : 'bg-blue-500'
+                            }`} />
+                            <span className="whitespace-pre-wrap">{pt}</span>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   )}
 

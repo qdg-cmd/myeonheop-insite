@@ -92,6 +92,11 @@ export const WorksheetPrint: React.FC<WorksheetPrintProps> = ({ profile, starred
                 <span className="border border-gray-300 px-2 py-0.5 rounded text-[11px] text-gray-600 bg-gray-50">
                   {q.type === 'deep' ? '심화 연계' : q.type === 'pressure' ? '약점 방어·압박' : '기록 진위 확인'}
                 </span>
+                {q.srcBadge && (
+                  <span className="border border-purple-300 px-2 py-0.5 rounded text-[11px] font-bold text-purple-800 bg-purple-50">
+                    {q.srcBadge.replace(/^\[+|\]+$/g, '')}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -122,7 +127,7 @@ export const WorksheetPrint: React.FC<WorksheetPrintProps> = ({ profile, starred
                 {/* 모범 답변 핵심 키워드 & 포인트 */}
                 {q.points && q.points.length > 0 && (
                   <div>
-                    <span className="font-bold text-gray-800 block mb-0.5">■ 필수 답변 키워드 & 포인트:</span>
+                    <span className="font-bold text-gray-800 block mb-0.5">■ {q.ansLabel || '필수 답변 키워드 & 포인트'}:</span>
                     <ul className="list-disc list-inside text-gray-700 space-y-0.5 pl-1 leading-relaxed">
                       {q.points.map((pt, pIdx) => (
                         <li key={pIdx}>{pt}</li>

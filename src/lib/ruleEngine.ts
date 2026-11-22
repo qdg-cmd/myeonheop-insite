@@ -1,41 +1,469 @@
 import { QuestionItem, StudentProfile, StudentRecordItem, CompetencyType } from '../types';
-import { CONCEPTS, FIELDS, COMMON, PRESSURE, TAIL } from './v4Data';
-import { sanitizeQuestionItem } from './gemini';
+import { CONCEPTS, FIELDS, TAIL } from './v4Data';
+import { PastExamData, getPastExamData } from './pastExamLoader';
 
+// ============================================================
+// 1. 한국어 음운 및 조사 자동 처리 (josa)
+// ============================================================
 const HANGUL = /[가-힣]/;
-function jong(ch: string): number {
+
+export function jong(ch: string): number {
   const c = ch.charCodeAt(0) - 0xAC00;
   return c < 0 || c > 11171 ? -1 : c % 28;
 }
-function jung(ch: string): number {
+
+export function jung(ch: string): number {
   const c = ch.charCodeAt(0) - 0xAC00;
   return c < 0 || c > 11171 ? -1 : Math.floor((c % 588) / 28);
 }
-function hasBatchim(w: string): boolean {
-  const ch = w.trim().slice(-1);
-  if (!HANGUL.test(ch)) return /[013678LMNR]$/i.test(ch);
+
+export function hasBatchim(w: string): boolean {
+  if (!w) return false;
+  const clean = String(w).replace(/[‘'“"”’)}\]>》」』\s]+$/g, '').trim();
+  if (!clean) return false;
+  const ch = clean.slice(-1);
+  if (!HANGUL.test(ch)) {
+    return /[013678LMNR]$/i.test(ch);
+  }
   return jong(ch) > 0;
 }
-function stripJong(ch: string): string {
+
+export function josa(w: string, a: string, b?: string): string {
+  if (!w) return '';
+  if (typeof a === 'string' && !b) {
+    if (a.includes('/')) {
+      const parts = a.split('/');
+      return w + (hasBatchim(w) ? parts[0] : parts[1]);
+    } else if (a === '은(는)') {
+      return w + (hasBatchim(w) ? '은' : '는');
+    } else if (a === '이(가)') {
+      return w + (hasBatchim(w) ? '이' : '가');
+    } else if (a === '을(를)') {
+      return w + (hasBatchim(w) ? '을' : '를');
+    } else if (a === '과(와)') {
+      return w + (hasBatchim(w) ? '과' : '와');
+    }
+    return w + a;
+  }
+  return w + (hasBatchim(w) ? a : (b || ''));
+}
+
+export function stripJong(ch: string): string {
   const c = ch.charCodeAt(0) - 0xAC00;
   return String.fromCharCode(0xAC00 + c - (c % 28));
 }
-function addJong(ch: string, j: number): string {
+
+export function addJong(ch: string, j: number): string {
   const c = ch.charCodeAt(0) - 0xAC00;
   return String.fromCharCode(0xAC00 + c - (c % 28) + j);
 }
 
-function pastOf(stemLast: string): string {
+export function escRegex(s: string): string {
+  return (s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ============================================================
+// 2. 토큰 및 서술어 제외/보호 필터링
+// ============================================================
+export const PROTECTED_NOUNS = new Set([
+  '실험', '체험', '결함', '포함', '위험', '보험', '모임', '게임', '팀', '빔', '림', '짐',
+  '틈', '힘', '프레임', '알고리즘', '시스템', '책임', '다짐', '울림', '부름', '흐름',
+  '바람', '사람', '그림', '보람', '살림', '나눔', '마음', '이음', '맞춤', '도움'
+]);
+
+const PRED_STANDALONE = /^(?:보임|돋보임|두드러짐|나타냄|드러냄|확인됨|이루어짐|높임|지님|가짐|느낌|깨달음|배움|익힘|이해함|파악함|참여함|수행함|탐구함|작성함|발표함|조사함|분석함|설명함|제시함|노력함|다짐함|인식함|우수함|탁월함|뛰어남|적극적임|인상적임|활동함|기록됨|관찰됨|발휘함|도출함|성취함|함|됨)$/;
+const VERB_COMPOUND = /[가-힣]{1,}(?:하였음|했음|되었음|보였음|함|됨|하며|하고|하여|해서|했으나|되나|하다|된다|이다|하며)$/;
+const FIXED_MODIFIERS = /^(?:하는|하여|하고|하며|적인|적으로|위한|통한|대한|있는|없는|같은|바탕으로|있음|없음|통해|위해|대해|된다|한다|이다|였다|됐다|되었다|되었다고|했다고|보였다고|보이며|보이고|보여|나타내며|나타내고|드러내며|드러내고)$/;
+
+export function isPredicateOrModifierToken(t: string): boolean {
+  if (!t || t.length < 2) return true;
+  if (PROTECTED_NOUNS.has(t)) return false;
+  for (const pn of PROTECTED_NOUNS) {
+    if (t.endsWith(pn) && t.length > pn.length) return false;
+  }
+  if (PRED_STANDALONE.test(t)) return true;
+  if (FIXED_MODIFIERS.test(t)) return true;
+  if (VERB_COMPOUND.test(t)) return true;
+  return false;
+}
+
+const JOSA_LIST = [
+  '에서부터', '으로부터', '으로의', '이라는', '에서는', '으로는', '에게서',
+  '부터', '까지', '에서', '으로', '에게', '처럼', '만큼',
+  '은', '는', '이', '가', '을', '를', '의', '에', '로', '와', '과', '도', '만'
+];
+
+export function stripJosa(word: string): string {
+  if (!word || word.length < 2) return '';
+  if (PROTECTED_NOUNS.has(word)) return word;
+  let target = word;
+  for (const josaItem of JOSA_LIST) {
+    if (target.endsWith(josaItem)) {
+      const stem = target.slice(0, -josaItem.length);
+      if (stem.length >= 2 && HANGUL.test(stem)) return stem;
+      return target;
+    }
+  }
+  return target;
+}
+
+export const STOP = new Set([
+  '있습니다', '합니다', '대한', '통해', '있는', '하는', '위한', '대학', '학생', '지원자', '면접',
+  '평가', '모집', '전형', '경우', '내용', '관련', '학과', '학부', '이상', '이내', '그리고', '또한',
+  '및', '등', '수', '것', '있다', '한다', '되는', '하여', '에서', '으로', '에게',
+  '보임', '돋보임', '두드러짐', '나타냄', '드러냄', '확인됨', '이루어짐', '높임', '지님', '가짐',
+  '느낌', '깨달음', '배움', '익힘', '이해함', '파악함', '참여함', '수행함', '탐구함', '작성함',
+  '발표함', '조사함', '분석함', '설명함', '제시함', '노력함', '다짐함', '인식함', '우수함', '탁월함',
+  '뛰어남', '적극적임', '인상적임', '활동함', '기록됨', '관찰됨', '발휘함', '도출함', '성취함',
+  '뛰어난', '우수한', '적극적인', '인상적인',
+  '활동', '과정', '결과', '모습', '태도', '노력', '관심', '흥미', '역량', '능력',
+  '방안', '해결방안', '실생활', '선행연구', '시각자료', '발표자료', '모둠', '친구', '교사', '수업',
+  '교과', '주제', '부분', '측면', '자세', '향상', '기여', '이해', '생각', '문제',
+  '해결', '영향', '다양한', '구체적', '적극적', '자발적', '심화', '기초', '연계', '경험',
+  '기회', '분야', '과목', '학년', '이유', '성장', '발전', '스스로', '직접', '주도적',
+  '바탕', '중심', '자신', '본인', '학습', '적용', '활용', '확인', '진행', '참여',
+  '수행', '작성', '발표', '조사', '탐구', '분석', '설명', '제시', '성취', '우수',
+  '탁월', '인상', '형성', '공유', '소통', '협력', '배려', '나눔', '실천', '유도',
+  '마련', '설정', '도출', '극복', '변화', '발휘', '파악', '주도', '주안점', '주안',
+  '의미', '가치', '중요성', '필요성', '목적', '목표', '방법', '도움', '역할', '기반',
+  '대상', '초점', '특성', '특징', '상황', '요소', '요인', '관계', '차이', '비교',
+  '정리', '선정', '고민', '주목', '지속적', '효과적', '창의적', '긍정적', '성공적', '체계적',
+  '종합적', '전반적', '다각적', '비판적', '논리적', '실질적', '실질', '사례', '예시', '자료',
+  '보고서', '에세이', '소논문', '소감', '느낀점', '깨달은점', '동기', '계기', '배경', '개인',
+  '공동체', '사회', '이후', '당시', '직후', '매우', '가장', '서로', '함께', '모두',
+  '원리', '개념', '이론', '구조'
+]);
+
+export const CONCEPT_EXCLUDE = new Set([
+  '시간', '변환', '효율', '현상', '실험', '프로그램', '구조', '원리', '방법', '방식',
+  '기능', '효과', '특징', '요소', '사례', '차이', '변화', '관계', '조건', '환경',
+  '상황', '무선', '수행', '참여', '진행', '분석', '탐구', '조사', '발표', '작성',
+  '활동', '과정', '결과', '역량', '능력', '태도', '노력', '관심', '이유', '목적',
+  '목표', '기준', '내용', '주제', '이해', '생각', '경험', '기회', '분야', '과목',
+  '관리', '오차', '전자기', '화학', '유전자', '협업', '활용', '설계', '제작', '비교',
+  '적용', '도출', '성실', '열정', '학습', '공부', '수업', '학교', '학생', '친구',
+  '기업', '전략', '사회', '경제', '문화', '인간', '정책', '시장', '역사', '국가',
+  '세계', '지역', '교육', '소비', '개발', '기술', '산업', '경영',
+  '학급', '모둠', '동아리', '부원', '급우', '선생님'
+]);
+
+// ============================================================
+// 3. TF-IDF 어휘 추출 및 개념어 매칭
+// ============================================================
+export interface KeywordScore {
+  term: string;
+  tf: number;
+  crossSectionDF: number;
+  score: number;
+  def?: string;
+}
+
+export function extractKeywordsAdvanced(
+  records: Array<{ text: string; grade?: number; sec?: string; subj?: string; area?: string }>,
+  quotesList: string[] = []
+): KeywordScore[] {
+  const tfMap = new Map<string, number>();
+  const secMap = new Map<string, Set<string>>();
+  const quoteTerms = new Set<string>();
+
+  (quotesList || []).forEach((q) => {
+    (q.match(/[가-힣A-Za-z0-9_]{2,20}/g) || []).forEach((w) => {
+      const stem = stripJosa(w);
+      if (stem.length >= 2 && !isPredicateOrModifierToken(stem) && !STOP.has(stem)) {
+        quoteTerms.add(stem);
+      }
+    });
+  });
+
+  const wordRegex = /[가-힣A-Za-z0-9_]{2,20}/g;
+
+  for (const rec of (records || [])) {
+    const text = rec.text || '';
+    const secKey = `${rec.grade || 0}_${rec.sec || ''}_${rec.subj || rec.area || ''}`;
+    let m: RegExpExecArray | null;
+    while ((m = wordRegex.exec(text)) !== null) {
+      const rawToken = m[0].trim();
+      if (rawToken.length < 2 || /^\d+$/.test(rawToken)) continue;
+      if (isPredicateOrModifierToken(rawToken)) continue;
+
+      const cleanTerm = stripJosa(rawToken);
+      if (cleanTerm.length < 2 || /^\d+$/.test(cleanTerm)) continue;
+      if (isPredicateOrModifierToken(cleanTerm)) continue;
+      if (STOP.has(cleanTerm)) continue;
+
+      tfMap.set(cleanTerm, (tfMap.get(cleanTerm) || 0) + 1);
+
+      if (!secMap.has(cleanTerm)) secMap.set(cleanTerm, new Set());
+      secMap.get(cleanTerm)!.add(secKey);
+    }
+  }
+
+  const scored: KeywordScore[] = [];
+  for (const [term, tf] of tfMap.entries()) {
+    let shapeBonus = 1.0;
+    if (quoteTerms.has(term)) shapeBonus *= 1.8;
+    if (term.length >= 4 && term.length <= 10 && HANGUL.test(term)) shapeBonus *= 1.4;
+    if (/[A-Za-z]/.test(term)) shapeBonus *= 1.6;
+
+    const crossSectionDF = secMap.get(term) ? secMap.get(term)!.size : 1;
+    const crossBonus = 1 + 0.25 * Math.min(crossSectionDF - 1, 3);
+    const score = (1 + Math.log(tf)) * shapeBonus * crossBonus;
+
+    scored.push({ term, tf, crossSectionDF, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
+export function buildFreq(text: string): Map<string, number> {
+  const f = new Map<string, number>();
+  (text.match(/[가-힣A-Za-z0-9]+/g) || []).forEach((w) => f.set(w, (f.get(w) || 0) + 1));
+  return f;
+}
+
+export function hasTerm(text: string, term: string): boolean {
+  if (!text || !term) return false;
+  if (term.length <= 2 && /[A-Za-z]/.test(term)) {
+    return new RegExp('(^|[^A-Za-z0-9])' + escRegex(term) + '([^A-Za-z0-9]|$)', 'i').test(text);
+  }
+  const re = new RegExp('(^|[^가-힣])' + escRegex(term) + '(?:$|[^가-힣]|(?:은|는|이|가|을|를|의|에|로|와|과|도|만|에서|으로|에게))');
+  return re.test(text);
+}
+
+const CONCEPT_IDX = (() => {
+  const arr: Array<{ term: string; i: number; re: RegExp }> = [];
+  CONCEPTS.forEach(([k, al], i) => {
+    [k, ...(al ? al.split('|') : [])].forEach((term) => {
+      const cleanTerm = term.trim();
+      if (cleanTerm.length >= 2) {
+        arr.push({
+          term: cleanTerm,
+          i,
+          re: new RegExp(escRegex(cleanTerm), /[A-Za-z]/.test(cleanTerm) ? 'i' : '')
+        });
+      }
+    });
+  });
+  arr.sort((a, b) => b.term.length - a.term.length);
+  return arr;
+})();
+
+export interface ConceptMatch {
+  i?: number;
+  term: string;
+  name: string;
+  def: string;
+  isBuiltin?: boolean;
+  isDynamic?: boolean;
+}
+
+export function findConcepts(t: string, dynamicKeywords?: KeywordScore[] | string[]): ConceptMatch[] {
+  const dynamicCandidates = (dynamicKeywords || []).filter((dk) => {
+    const term = typeof dk === 'string' ? dk : dk.term;
+    const score = (typeof dk === 'object' && dk.score) ? dk.score : 0;
+    const tf = (typeof dk === 'object' && dk.tf) ? dk.tf : 1;
+    if (!term || term.length < 2) return false;
+    if (isPredicateOrModifierToken(term) || STOP.has(term) || CONCEPT_EXCLUDE.has(term)) return false;
+    return (score >= 1.35 || tf >= 2);
+  });
+
+  const builtinMatches: ConceptMatch[] = [];
+  const seenTerms = new Set<string>();
+  const seenNames = new Set<string>();
+
+  for (const c of CONCEPT_IDX) {
+    let matched = false;
+    if (c.term.length <= 2 && /[A-Za-z]/.test(c.term)) {
+      if (new RegExp('(^|[^A-Za-z0-9])' + escRegex(c.term) + '([^A-Za-z0-9]|$)', 'i').test(t))
+        matched = true;
+    } else if (/[가-힣]/.test(c.term)) {
+      const re = new RegExp('(^|[^가-힣])' + escRegex(c.term) + '(?:$|[^가-힣]|(?:은|는|이|가|을|를|의|에|로|와|과|도|만))');
+      if (re.test(t)) matched = true;
+    } else if (c.re && c.re.test(t)) {
+      matched = true;
+    }
+
+    if (matched && !seenNames.has(CONCEPTS[c.i][0])) {
+      builtinMatches.push({
+        i: c.i,
+        term: c.term,
+        name: CONCEPTS[c.i][0],
+        def: CONCEPTS[c.i][2],
+        isBuiltin: true
+      });
+      seenTerms.add(c.term);
+      seenNames.add(CONCEPTS[c.i][0]);
+    }
+  }
+
+  const dynamicMatches: ConceptMatch[] = [];
+  for (const dk of dynamicCandidates) {
+    const term = typeof dk === 'string' ? dk : dk.term;
+    if (seenTerms.has(term) || seenNames.has(term)) continue;
+
+    if (hasTerm(t, term)) {
+      dynamicMatches.push({
+        term,
+        name: term,
+        def: (typeof dk === 'object' && dk.def) ? dk.def : `학생부 속 주요 탐구 주제 ‘${term}’`,
+        isDynamic: true
+      });
+      seenTerms.add(term);
+      seenNames.add(term);
+      if (dynamicMatches.length >= 4) break;
+    }
+  }
+
+  const allMatches = [...builtinMatches, ...dynamicMatches];
+  return allMatches.filter((m) => {
+    if (m.isDynamic) {
+      for (const other of allMatches) {
+        if (other !== m && other.term.includes(m.term) && other.term.length > m.term.length) {
+          return false;
+        }
+      }
+    }
+    return true;
+  });
+}
+
+// ============================================================
+// 4. 문장 및 행동 서술어 분석
+// ============================================================
+const FLAG_RE: Record<string, RegExp> = {
+  inquiry: /탐구|조사|분석|연구|고찰|규명|비교/,
+  experiment: /실험|측정|관찰|변인|가설/,
+  make: /제작|설계|코딩|구현|프로그램|앱|만들/,
+  present: /발표|설명함|소개함|강연|수업을 (?:기획|진행)|내가 만든 수업/,
+  report: /보고서|소논문|논술|에세이|글을 작성|서평|감상문|칼럼|기사/,
+  debate: /토론|찬반|반론|입론|반박/,
+  read: /읽고|도서|독서|서평/,
+  leader: /반장|회장|부회장|부장|팀장|모둠장|조장|대표(?!성|적)|리더|총괄/,
+  conflict: /갈등|의견\s*차이|의견을\s*조율|조율|중재/,
+  coop: /협력|협업|협동|함께|팀원|모둠원|구성원/,
+  care: /배려|봉사|나눔|도움|도와|멘토|멘티|도우미|튜터/,
+  plan: /(?=[\s\S]*(?:학급|학교|구성원|친구|캠페인|부스|모둠|공동체|지역|급우|부원))(?:기획|운영|캠페인|개선안|행사)/,
+  expand: /나아가|심화|추가로|확장|더 나아가|후속|이어서|스스로|자발적|자기\s*주도|주도적/,
+  reflect: /깨달|느낌|느꼈|인식|계기|성찰|반성/,
+  trait: /학생임|성품|태도가|인성|책임감|성실|정직|꾸준|끈기/
+};
+
+const GENERIC_RE = /^(수업에 적극적으로 참여함|성실하게 참여함|수업 태도가 좋음)/;
+const PRED_STRONG = /(우수|탁월|뛰어나|뛰어남|돋보|두드러|월등|발군|인상적|발표|제작|설계|코딩|구현|실험|측정|탐구|분석|규명|고찰|기획|운영|개선|주도|중재|조율|설득|반박|도출|선정|구축|개발|적용|해결|비교|평가|작성|제안|주장)(?:하였|했|하였음|했음|하며|하여|함|됨|으며|고|다)/;
+const PRED_EVAL = /(우수함|탁월함|돋보임|두드러짐|인상적임|발군임|뛰어남|발휘함|모범이\s?됨|인정받음|호평을\s?받음|칭찬을\s?받음|주목을\s?받음)\s*\.?$/;
+const PRED_WEAK = /(소감을\s?밝힘|소감을\s?나눔|알게\s?됨|이해함|배움|익힘|파악함|생각함|기대함|다짐함|되새김|다짐하였음|생각하게\s?됨|관심을\s?가짐|관심을\s?갖게\s?됨|관심이\s?생김|흥미를\s?느낌|흥미를\s?가짐|흥미를\s?갖게\s?됨|계기가\s?됨|계기가\s?되었음|참여함|참여하였음|참석함|경청함|시야를\s?넓힘|안목을\s?넓힘|견문을\s?넓힘|소중함을\s?앎|중요성을\s?앎|필요성을\s?앎|성찰함|반성함)\s*\.?$/;
+
+export interface SentenceItem {
+  id?: string;
+  sec: '교과' | '창체' | '행특' | '독서' | '기타';
+  grade: number;
+  subj?: string;
+  area?: string;
+  text: string;
+  qtext?: string;
+  rid: number | string;
+  pi: number;
+  rel: number;
+  score: number;
+  f: Record<string, boolean>;
+  quotes: Array<{ q: string; book: boolean }>;
+  concepts: ConceptMatch[];
+  skip?: string | null;
+  pred?: any;
+}
+
+export function predInfo(t: string): { weak: boolean; strong: boolean; evalEnd: boolean; qtext: string | null; skip: string | null } {
+  const x = t.replace(/\s+$/, '');
+  const weak = PRED_WEAK.test(x);
+  const evalEnd = PRED_EVAL.test(x);
+  const body = weak ? x.replace(PRED_WEAK, '') : x;
+  const strongAll = [...body.matchAll(new RegExp(PRED_STRONG.source, 'g'))];
+  const strong = strongAll.length > 0 || evalEnd;
+  let qtext: string | null = null;
+  if (weak && strongAll.length) {
+    const CUT = new RegExp(PRED_STRONG.source.replace(/\(하였\|.*$/, '') + '(?:하였고|했고|하고|하였으며|했으며|하며|하면서|하여|함|하였음|했음)(?=[\\s,.]|$)', 'g');
+    const cs = [...body.matchAll(CUT)];
+    if (!cs.length) return { weak, strong, evalEnd, qtext: null, skip: (x.match(PRED_WEAK) || [''])[0].replace(/\s*\.$/, '') };
+    const m = cs[cs.length - 1];
+    let cut = x.slice(0, m.index + m[0].length);
+    cut = cut.replace(/(하였고|했고|하고|하였으며|했으며|하며|하면서|하여|하였음|했음)$/, '함');
+    if (cut.length >= 15) qtext = cut;
+  }
+  return { weak, strong, evalEnd, qtext, skip: weak && !qtext ? (x.match(PRED_WEAK) || [''])[0].replace(/\s*\.$/, '') : null };
+}
+
+export function analyze(s: SentenceItem, ctx: { major: string; majorKw: string[]; dynamicKeywords?: KeywordScore[] }): SentenceItem {
+  const t = s.text;
+  const f: Record<string, boolean> = {};
+  for (const k in FLAG_RE) f[k] = FLAG_RE[k].test(t);
+
+  const quotes: Array<{ q: string; book: boolean }> = [];
+  const qre = /[‘'"“「『<《]([^’'"”」』>》]{2,70})[’'"”」』>》]/g;
+  let m: RegExpExecArray | null;
+  while ((m = qre.exec(t))) {
+    const q = m[1].trim();
+    const after = t.slice(m.index + m[0].length, m.index + m[0].length + 14);
+    const isBook =
+      (/^\s*\(/.test(after) && /^\s*\([^)]{1,25}\)\s*(?:을|를|의)?\s*(?:읽|통해|바탕)/.test(after)) ||
+      /^(?:을|를)\s*읽/.test(after.replace(/^\([^)]*\)/, '')) ||
+      (/^\([^)]{1,20}\)/.test(after) && /읽|독서|서평/.test(t));
+    quotes.push({ q, book: isBook });
+  }
+
+  const concepts = findConcepts(t, ctx && ctx.dynamicKeywords);
+  let rel = 0;
+  if (ctx.majorKw && ctx.majorKw.length) {
+    for (const k of ctx.majorKw) {
+      if (k.length >= 2 && t.includes(k)) rel++;
+    }
+  }
+
+  let score = ({ 교과: 1.0, 창체: 0.9, 행특: 0.5, 독서: 0.6, 기타: 0.8 } as Record<string, number>)[s.sec] || 0.8;
+  if (s.area === '진로활동') score += 0.3;
+  if (s.area === '자율활동') score -= 0.1;
+  score += Math.min(quotes.length, 2) * 0.8 + Math.min(concepts.length, 3) * 0.6 + Math.min(rel, 3) * 0.9;
+
+  if (f.experiment) {
+    const isLiteratureOnly = /(?:조사|검색|읽고|읽음|정리|소개|파악|이해|알아봄|학습)/.test(t);
+    const hasHandsOn = /(?:설계|수행|측정|조작|통제|관찰|진행|실시|제작|검증|비교분석)/.test(t);
+    if (isLiteratureOnly && !hasHandsOn) {
+      f.experiment = false;
+      f.inquiry = true;
+    }
+  }
+
+  ['inquiry', 'experiment', 'make', 'report', 'debate', 'read', 'present'].forEach((k) => {
+    if (f[k]) score += 0.35;
+  });
+
+  if (t.length < 30) score -= 0.8;
+  if (/^(이를|이러한|이와|이에|이 과정|이후|그 결과|해당|위 )/.test(t)) score -= 1.3;
+  if (t.length > 60) score += 0.2;
+  if (GENERIC_RE.test(t)) score -= 2;
+
+  const pi = predInfo(t);
+  if (pi.strong) score += 0.6;
+  if (pi.evalEnd) score += 0.3;
+  if (pi.skip) score -= 9;
+
+  return { ...s, f, quotes, concepts, rel, score, pred: pi, skip: pi.skip, qtext: pi.qtext || undefined };
+}
+
+// ============================================================
+// 5. 과거 인용절 변환 및 4종 리드문 생성 (lead)
+// ============================================================
+export function pastOf(stemLast: string): string {
   const v = jung(stemLast);
   return v === 0 || v === 8 || v === 2 || v === 9 ? '았' : '었';
 }
 
-function contractPast(st: string): string {
+export function contractPast(st: string): string {
   const map: Record<string, string> = {
     보: '보았', 주: '주었', 두: '두었', 나누: '나누었', 하: '했', 되: '되었', 오: '왔', 가: '갔',
     서: '섰', 내: '냈', 세우: '세웠', 배우: '배웠', 키우: '키웠', 다루: '다루었', 이루: '이루었',
     치: '쳤', 키: '켰', 리: '렸', 기: '겼', 지: '졌', 시: '셨', 피: '폈', 끼: '꼈',
-    르: '렀', 우: '웠', 추: '췄', 쓰: '썼', 크: '컸', 뜨: '떴', 트: '텄',
+    르: '렀', 우: '웠', 추: '췄', 쓰: '썼', 크: '컸', 뜨: '떴', 트: '텄'
   };
   if (map[st]) return map[st];
   const v = jung(st);
@@ -67,19 +495,11 @@ function contractPast(st: string): string {
   return st + pastOf(st);
 }
 
-/**
- * 한국어 어미를 자연스러운 과거 인용절로 변환 (~했다고)
- */
 export function toPastClause(chunk: string): string | null {
   const c = chunk.trim().replace(/[.,;]+$/, '').replace(/\s+/g, ' ');
   const rules: Array<[RegExp, string]> = [
     [/(하였음|했음|하였다|했다|함|하였고|했고|하고|하며|하였으며|했으며|하여|해서|해)$/, '했다고'],
     [/(되었음|됐음|되었다|됨|되었고|되고|되며|되어|돼)$/, '되었다고'],
-    [/(결과를 도출함|결과를 얻음|결과를 이끌어냄|결과)$/, '결과를 도출했다고'],
-    [/(도출하여|산출하여|도출하고|산출하고)$/, '도출했다고'],
-    [/(바탕으로|토대로)$/, '바탕으로 탐구했다고'],
-    [/(위하여|위해)$/, '위해 노력했다고'],
-    [/(통하여|통해)$/, '통해 배웠다고'],
     [/(보였음|보임|보이며|보이고|보여)$/, '보였다고'],
     [/(도움|도우며|도와)$/, '도왔다고'],
     [/(밝힘|밝히며|밝히고)$/, '밝혔다고'],
@@ -90,7 +510,7 @@ export function toPastClause(chunk: string): string | null {
     [/(없음|없으며|없고)$/, '없었다고'],
     [/(였음|였으며|였고)$/, '였다고'],
     [/냄$|내며$|내고$/, '냈다고'],
-    [/씀$|쓰며$|쓰고$/, '썼다고'],
+    [/씀$|쓰며$|쓰고$/, '썼다고']
   ];
   for (const [re, rep] of rules) {
     if (re.test(c)) return c.replace(re, rep);
@@ -98,41 +518,23 @@ export function toPastClause(chunk: string): string | null {
   const last = c.slice(-1);
   const prev = c.slice(0, -1);
   if (!HANGUL.test(last)) return null;
-
-  if (/[고며]$/.test(c) && prev.length) {
-    const st = prev.slice(-1);
-    if (HANGUL.test(st)) {
-      if (jong(st) === 0) return prev.slice(0, -1) + contractPast(st) + '다고';
-      return prev + pastOf(st) + '다고';
-    }
-  }
-  if (/[어아]$/.test(c) && prev.length) {
-    return prev + (last === '아' ? '았' : '었') + '다고';
-  }
-  if (last === '음' && prev.length) {
-    const st = prev.slice(-1);
-    if (HANGUL.test(st)) return prev + pastOf(st) + '다고';
-  }
-  if (jong(last) === 16) {
-    const stem = stripJong(last);
-    if (stem === '하') return prev + '했다고';
-    if (stem === '이') return prev.length ? prev + '이라고' : null;
-    return prev + contractPast(stem) + '다고';
+  const j = jong(last);
+  if (j === 16) {
+    const st = stripJong(last);
+    return prev + contractPast(st) + '다고';
   }
   return null;
 }
 
 const LEAD_RE = /^(또한|특히|나아가|더 나아가|이어|이어서|그리고|아울러|더불어|이후|이를 통해|이를 바탕으로|이 과정에서|그 결과|이에|또)\s*,?\s*/;
 
-function clauseFor(text: string, anchor: string | null): string | null {
-  const t = text.replace(/\s*\.$/, '').replace(LEAD_RE, '');
+export function clauseFor(s: SentenceItem, anchor?: string | null): string | null {
+  const t = (s.qtext || s.text).replace(/\s*\.$/, '').replace(LEAD_RE, '');
   if (t.length <= 95) {
     const c = toPastClause(t);
     if (c) return c;
   }
-  const parts = t.split(
-    /(?<=(?:하고|하며|하여|하였으며|했으며|하였고|했고|이며|으며|였으며|되며|되어|되고|읽고|보고|통해|바탕으로|위해|위하여|결과|후)),?\s+/
-  );
+  const parts = t.split(/(?<=(?:하고|하며|하여|하였으며|했으며|하였고|했고|이며|으며|였으며|되며|되어|되고|읽고|보고|통해|바탕으로|위해|위하여|결과|후)),?\s+/);
   let idx = 0;
   if (anchor) {
     idx = parts.findIndex((p) => p.includes(anchor));
@@ -153,629 +555,1419 @@ function clauseFor(text: string, anchor: string | null): string | null {
   return toPastClause(seg);
 }
 
-function makeLead(r: StudentRecordItem, text: string, anchor: string | null): string {
-  const g = r.grade ? `${r.grade} ` : '';
-  const label = `(${g}${r.subject})`;
-  const c = clauseFor(text, anchor);
-  if (c) return `${label} ${c} 되어 있는데,`;
-  let t = text.replace(/\.$/, '');
-  if (t.length > 70) t = t.slice(0, 68) + '…';
+export function recordLabel(s: SentenceItem): string {
+  const g = s.grade ? `${s.grade}학년 ` : '';
+  if (s.sec === '교과') return `(${g}${s.subj || '교과'})`;
+  if (s.sec === '창체') return `(${g}${s.area || '창체'})`;
+  if (s.sec === '행특') return `(${g}행동특성 및 종합의견)`;
+  if (s.sec === '독서') return `(${g}독서)`;
+  return g ? `(${g.trim()})` : '';
+}
+
+export function lead(s: SentenceItem, anchor?: string | null, variantIdx?: number): string {
+  const c = clauseFor(s, anchor);
+  const label = recordLabel(s);
+  const v = typeof variantIdx === 'number' ? variantIdx % 4 : ((s.pi || 0) + (typeof s.rid === 'number' ? s.rid : 0)) % 4;
+  if (c) {
+    if (v === 1) return `${label} 기록을 보면 ${c.replace(/고$/, '는')} 내용이 눈에 띕니다.`;
+    if (v === 2) return `${label} 활동에서 ${c} 기재되어 있는데,`;
+    if (v === 3) return `${label} 관련하여 ${c.replace(/고$/, '는')} 점이 인상적인데,`;
+    return `${label} ${c} 되어 있는데,`;
+  }
+  let t = (s.qtext || s.text).replace(/\.$/, '');
+  if (t.length > 75) t = t.slice(0, 72) + '…';
+  if (v === 1) return `${label} 기록을 보면 ‘${t}’라는 내용이 눈에 띕니다.`;
+  if (v === 2) return `${label} 활동에서 ‘${t}’라고 기재되어 있는데,`;
+  if (v === 3) return `${label} 관련하여 ‘${t}’라는 점이 인상적인데,`;
   return `${label} ‘${t}’라는 기록이 있는데,`;
 }
 
-// 불용어 목록
-const STOPWORDS = new Set([
-  '학생', '자신', '활동', '내용', '통해', '관련', '수업', '탐구', '결과', '진행',
-  '모둠', '참여', '노력', '역량', '모습', '태도', '생각', '학교', '발표', '과정',
-  '이해', '학습', '시간', '주제', '대한', '위해', '바탕', '활용', '능력', '우수',
-  '다양한', '여러', '가지', '경우', '이후', '스스로', '직접', '주도적', '적극적',
-  '교과', '과목', '학년', '분야', '문제', '방법', '이유', '측면', '경험', '기회'
-]);
-
-/**
- * 학생부 텍스트에서 3회 이상 등장하는 고빈도 명사 및 사용자 지정 키워드를 동적 핵심 키워드로 추출
- */
-export function extractFrequentKeywords(
-  records: StudentRecordItem[],
-  customKeywords?: string[]
-): Array<{ term: string; name: string; count: number; isCustom?: boolean }> {
-  const counts = new Map<string, { count: number; isCustom?: boolean }>();
-
-  // 1. 사용자 지정 키워드 우선 등록 (최우선 순위 가중치)
-  if (customKeywords && customKeywords.length > 0) {
-    customKeywords.forEach((kw) => {
-      const clean = kw.trim();
-      if (clean.length >= 2) {
-        counts.set(clean, { count: 99, isCustom: true });
-      }
-    });
-  }
-
-  // 2. 학생부 전체 텍스트 빈도 분석 (가벼운 TF-IDF/고빈도 어휘 추출)
-  const wordRegex = /[가-힣A-Za-z0-9]{2,12}/g;
-  for (const rec of records) {
-    const text = rec.text.replace(/<[^>]+>/g, '');
-    let m;
-    while ((m = wordRegex.exec(text)) !== null) {
-      const w = m[0].trim();
-      if (w.length >= 2 && !STOPWORDS.has(w) && !/^\d+$/.test(w)) {
-        let cleanWord = w;
-        if (cleanWord.length >= 3 && /(은|는|이|가|을|를|의|에|로|와|과|도)$/.test(cleanWord)) {
-          cleanWord = cleanWord.slice(0, -1);
-        }
-        if (cleanWord.length >= 2 && !STOPWORDS.has(cleanWord)) {
-          const prev = counts.get(cleanWord);
-          if (prev) {
-            if (!prev.isCustom) prev.count += 1;
-          } else {
-            counts.set(cleanWord, { count: 1, isCustom: false });
-          }
-        }
-      }
-    }
-  }
-
-  const results: Array<{ term: string; name: string; count: number; isCustom?: boolean }> = [];
-  for (const [term, data] of counts.entries()) {
-    if (data.isCustom || data.count >= 3) {
-      results.push({ term, name: term, count: data.count, isCustom: data.isCustom });
-    }
-  }
-
-  results.sort((a, b) => b.count - a.count);
-  return results.slice(0, 15);
+// ============================================================
+// 6. 후보 문항 구조 및 candidatesFrom (13개 핵심 유형)
+// ============================================================
+export interface CandidateQuestion {
+  b: 'A' | 'C' | 'P' | 'M' | 'D' | 'T';
+  k: string;
+  p: number;
+  type: string;
+  tplId?: string;
+  typeGroup?: string;
+  src?: string;
+  srcBadge?: string;
+  catGroup?: 'univ_q' | 'cases' | 'qb' | 'record' | 'common' | 'fusion' | 'past';
+  text: string;
+  rtext?: string;
+  rlab?: string;
+  sref?: SentenceItem;
+  ans?: string | null;
+  ansLabel?: string | null;
+  tip?: string | null;
+  tails?: string[];
+  points?: string[];
 }
 
-// 개념어 색인
-const CONCEPT_IDX = (() => {
-  const arr: Array<{ term: string; name: string; def: string }> = [];
-  CONCEPTS.forEach(([k, al, d]) => {
-    [k, ...(al ? al.split('|') : [])].forEach((term) => {
-      const cleanTerm = term.trim();
-      if (cleanTerm.length >= 2) {
-        arr.push({ term: cleanTerm, name: k, def: d });
-      }
-    });
+function Q(o: Partial<CandidateQuestion> & { b: 'A' | 'C' | 'P' | 'M' | 'D' | 'T'; k: string; p: number; type: string; text: string }): CandidateQuestion {
+  return {
+    ans: null,
+    tip: null,
+    tails: [],
+    src: '생기부',
+    ...o
+  };
+}
+
+function pick(arr?: string[]): string {
+  if (!arr || !arr.length) return '';
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+export function candidatesFrom(s: SentenceItem, ctx: { major: string; majorKw: string[] }): CandidateQuestion[] {
+  const out: CandidateQuestion[] = [];
+  const M = ctx.major || '지원 학과';
+  const topic = s.quotes.find((q) => !q.book);
+  const book = s.quotes.find((q) => q.book);
+  const anc = (topic && topic.q) || (book && book.q) || (s.concepts[0] && s.concepts[0].term) || null;
+  const f = s.f;
+  const key = `${s.rid}:${s.pi}`;
+
+  // 1. Concepts (4 angles: def, apply, limit, compare)
+  s.concepts.slice(0, 2).forEach((c, k) => {
+    const L_def = lead(s, c.term, 0);
+    const L_app = lead(s, c.term, 1);
+    const L_lim = lead(s, c.term, 2);
+    const L_cmp = lead(s, c.term, 3);
+    const nm = c.term === c.name || c.term.includes(c.name) ? `‘${c.term}’` : `‘${c.term}’${/[가-힣]$/.test(c.term) && hasBatchim(c.term) ? '과' : '와'} 관련된 ‘${c.name}’`;
+    const ansDef = c.isDynamic
+      ? `‘${c.name}’의 핵심 개념을 1문장으로 정의한 뒤, 생기부 탐구에서 이를 어떻게 적용·분석했고 어떤 결론을 얻었는지 [정의 → 적용 과정 → 학업적 깨달음] 3단계로 구조화해 답변하세요.`
+      : c.def || `‘${c.name}’의 교과서적 개념과 원리를 설명하세요.`;
+
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_cdef_${k}`,
+        p: 3.4 + s.score * 0.3 - k * 0.4,
+        type: '개념원리',
+        tplId: 'concept_def',
+        typeGroup: 'concept',
+        text: `${L_def} ${nm}의 핵심 개념과 작동 원리를 처음 듣는 사람도 이해하기 쉽게 설명해 주세요.`,
+        ans: ansDef,
+        tip: '정의를 외워 말하기보다 자기 말로 핵심 원리 한 문장 + 일상 비유 연결',
+        tails: [pick(TAIL.verify)]
+      })
+    );
+
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_capp_${k}`,
+        p: 3.2 + s.score * 0.3 - k * 0.4,
+        type: '개념적용',
+        tplId: 'concept_apply',
+        typeGroup: 'concept',
+        text: `${L_app} ${nm}의 원리가 실제 탐구 과정이나 결과에서 구체적으로 어떻게 적용되고 확인되었는지 설명해 주세요.`,
+        ans: ansDef,
+        tip: '교과 이론이 본인의 구체적 활동 장면(수치·현상)에서 어떻게 구현되었는지 증명',
+        tails: ['적용 과정에서 교과서 이론과 실제 관찰 결과가 일치했나요?']
+      })
+    );
+
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_clim_${k}`,
+        p: 3.0 + s.score * 0.25 - k * 0.4,
+        type: '개념한계',
+        tplId: 'concept_limit',
+        typeGroup: 'concept',
+        text: `${L_lim} ${josa(nm, '을/를')} 실제 환경에 적용할 때 발생할 수 있는 한계점이나 예외적인 조건은 무엇인지 설명해 주세요.`,
+        ans: ansDef,
+        tip: '이론적 이상 조건과 현실 적용 환경의 차이점을 파악하고 대안 제시',
+        tails: ['그 한계를 극복하기 위해 제안할 수 있는 보완 방법은 무엇인가요?']
+      })
+    );
+
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_ccmp_${k}`,
+        p: 2.9 + s.score * 0.25 - k * 0.4,
+        type: '개념비교',
+        tplId: 'concept_compare',
+        typeGroup: 'concept',
+        text: `${L_cmp} ${josa(nm, '과/와')} 유사하거나 대안이 될 수 있는 다른 기술·이론과의 결정적인 차이점을 설명해 주세요.`,
+        ans: ansDef,
+        tip: '두 개념의 장단점을 명확히 대비하고 해당 탐구에서 이 개념을 선택한 이유 설명',
+        tails: ['다른 방식을 채택했을 때보다 어떤 점에서 더 유리했나요?']
+      })
+    );
   });
-  arr.sort((a, b) => b.term.length - a.term.length);
-  return arr;
-})();
 
-function findConcepts(
-  text: string,
-  dynamicKeywords?: Array<{ term: string; name: string; isCustom?: boolean }>
-): Array<{ term: string; name: string; def: string; isCustom?: boolean }> {
-  const hit: Array<{ term: string; name: string; def: string; isCustom?: boolean }> = [];
-
-  // 사용자 지정 및 동적 추출 키워드 우선 매칭
-  if (dynamicKeywords && dynamicKeywords.length > 0) {
-    for (const dk of dynamicKeywords) {
-      if (text.includes(dk.term)) {
-        hit.push({
-          term: dk.term,
-          name: dk.name,
-          def: dk.isCustom
-            ? `선택 지정된 집중 탐구 키워드 '${dk.name}'에 관한 구체적 탐구 배경과 학업적 깊이 검증`
-            : `학생부 속 주요 반복 탐구 주제 '${dk.name}'`,
-          isCustom: dk.isCustom,
-        });
-        if (hit.length >= 3) return hit;
-      }
-    }
+  // 2. Experiment (4 angles)
+  if (f.experiment) {
+    const L0 = lead(s, anc, 0), L1 = lead(s, anc, 1), L2 = lead(s, anc, 2), L3 = lead(s, anc, 3);
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_exp_vars`,
+        p: 2.8 + s.score * 0.3,
+        type: '실험검증',
+        tplId: 'exp_vars',
+        text: `${L0} 실험에서 설정한 가설과 이를 검증하기 위해 엄밀하게 통제한 변인은 무엇이었나요?`,
+        tip: '조작 변인 1개와 통제 변인 2~3개를 명확히 구분하고 통제 방법 구체 제시',
+        tails: ['통제 변인이 흔들렸다면 결과에 어떤 왜곡이 생겼을까요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_exp_error`,
+        p: 2.7 + s.score * 0.3,
+        type: '오차분석',
+        tplId: 'exp_error',
+        text: `${L1} 실험 과정에서 발생한 측정 오차나 예상 밖의 결과 원인을 어떻게 분석하고 해결했나요?`,
+        tip: '오차를 단순 실수로 넘기지 않고 기기적·환경적 요인을 이론적으로 분석',
+        tails: ['다시 실험한다면 오차를 줄이기 위해 측정 방식을 어떻게 바꾸겠습니까?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_exp_ctrl`,
+        p: 2.5 + s.score * 0.25,
+        type: '실험설계',
+        tplId: 'exp_control',
+        text: `${L2} 실험 결과의 신뢰도를 확보하기 위해 대조군을 어떻게 설계했고, 실험의 재현성은 어떻게 검증했나요?`,
+        tip: '대조군 설정 기준과 데이터의 반복 측정 횟수 및 표준편차 언급',
+        tails: ['재현성을 방해하는 가장 큰 외부 변수는 무엇이었나요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_exp_follow`,
+        p: 2.4 + s.score * 0.25,
+        type: '후속실험',
+        tplId: 'exp_followup',
+        text: `${L3} 이 실험 결과를 바탕으로 학문적 호기심을 확장해 추가로 시도해 보고 싶은 후속 실험이 있다면 제안해 보세요.`,
+        tip: '기존 실험의 한계점을 디딤돌 삼아 새로운 조작 변인을 적용하는 후속 설계 제시',
+        tails: ['그 후속 실험을 위해 대학에서 배우고 싶은 연구 장비나 이론은 무엇인가요?']
+      })
+    );
   }
 
-  for (const c of CONCEPT_IDX) {
-    if (text.includes(c.term)) {
-      if (!hit.some((h) => h.name === c.name)) {
-        hit.push(c);
-      }
-      if (hit.length >= 3) break;
-    }
+  // 3. Inquiry / Topic (4 angles)
+  if (topic && (f.inquiry || f.report || f.present)) {
+    const L0 = lead(s, topic.q, 0), L1 = lead(s, topic.q, 1), L2 = lead(s, topic.q, 2), L3 = lead(s, topic.q, 3);
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_inq_concl`,
+        p: 2.7 + s.score * 0.3,
+        type: '탐구결론',
+        tplId: 'inq_conclusion',
+        text: `${L0} ‘${topic.q}’ 탐구에서 도출한 최종 결론과 이를 입증하는 가장 결정적인 근거는 무엇이었나요?`,
+        tip: '결론 두괄식 제시 → 정량적 데이터나 학술 문헌 근거 2가지 제시',
+        tails: [pick(TAIL.process)]
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_inq_cred`,
+        p: 2.5 + s.score * 0.25,
+        type: '자료검증',
+        tplId: 'inq_credibility',
+        text: `${L1} ${josa(`‘${topic.q}’`, '을/를')} 탐구하며 활용한 자료나 데이터의 출처는 무엇이며, 신뢰성을 어떻게 검증했나요?`,
+        tip: '단순 인터넷 검색이 아닌 공공기관 통계, 학술 데이터베이스 논문 교차 검증 강조',
+        tails: ['서로 상충되는 자료를 발견했을 때는 어느 쪽을 채택했나요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_inq_diff`,
+        p: 2.4 + s.score * 0.25,
+        type: '탐구차별성',
+        tplId: 'inq_different',
+        text: `${L2} ‘${topic.q}’ 주제에 대한 기존 연구나 일반적 시각과 비교할 때 본인 탐구만의 차별점은 무엇인가요?`,
+        tip: '기존 내용 요약에 그치지 않고 학생만의 새로운 해석이나 적용 사례 제시',
+        tails: ['그 차별점이 기존 견해보다 우수하다고 확신하는 근거는 무엇인가요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_inq_lim`,
+        p: 2.3 + s.score * 0.2,
+        type: '탐구한계',
+        tplId: 'inq_limit',
+        text: `${L3} ‘${topic.q}’ 탐구를 마친 후 스스로 느낀 학업적 한계점과 이를 보완하기 위한 방안은 무엇인가요?`,
+        tip: '부족했던 지점(표본 크기, 이론적 깊이 등) 인정 및 대학 진학 후 보완 계획 연결',
+        tails: [pick(TAIL.limit)]
+      })
+    );
   }
-  return hit;
+
+  // 4. Make / Engineering (4 angles)
+  if (f.make) {
+    const L0 = lead(s, anc, 0), L1 = lead(s, anc, 1), L2 = lead(s, anc, 2), L3 = lead(s, anc, 3);
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_make_arch`,
+        p: 2.6 + s.score * 0.3,
+        type: '설계구조',
+        tplId: 'make_arch',
+        text: `${L0} 제작한 결과물의 핵심 알고리즘 구조와 데이터 처리 흐름을 단계별로 설명해 주세요.`,
+        tip: '입력-처리-출력 단계의 핵심 메커니즘을 구조화하여 명확히 답변',
+        tails: ['직접 구현한 코드와 외부 라이브러리 사용 영역을 구분해 말해 주세요.']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_make_rsn`,
+        p: 2.5 + s.score * 0.25,
+        type: '기술선택',
+        tplId: 'make_reason',
+        text: `${L1} 구현 과정에서 다른 도구나 방식 대신 현재의 기술 스택을 선택한 명확한 기준은 무엇이었나요?`,
+        tip: '효율성, 처리 속도, 개발 편의성 등 비교 평가 기준 제시',
+        tails: ['다른 방식을 썼다면 어떤 문제가 발생했을 것으로 보나요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_make_dbg`,
+        p: 2.4 + s.score * 0.25,
+        type: '문제해결',
+        tplId: 'make_debug',
+        text: `${L2} 구현 중 발생한 가장 까다로웠던 기술적 오류(버그)는 무엇이었고, 이를 어떻게 디버깅했나요?`,
+        tip: '증상 파악 → 가설 수립 → 코드 수정 및 검증 단계의 디버깅 역량 부각',
+        tails: ['그 오류를 해결하면서 새롭게 터득한 프로그래밍 원리는 무엇인가요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'A',
+        k: `${key}_make_use`,
+        p: 2.3 + s.score * 0.2,
+        type: '성능개선',
+        tplId: 'make_usability',
+        text: `${L3} 제작한 결과물을 실제 환경이나 사용자에게 적용했을 때 어떤 피드백이 있었고 무엇을 개선했나요?`,
+        tip: '사용자 관점 피드백과 시스템 최적화(예외 처리, 메모리 최적화 등) 노력 연결',
+        tails: ['상용화 수준으로 끌어올린다면 어떤 기능을 추가하고 싶나요?']
+      })
+    );
+  }
+
+  // 5. Debate (2 angles)
+  if (f.debate) {
+    const L0 = lead(s, anc, 0), L1 = lead(s, anc, 1);
+    out.push(
+      Q({
+        b: 'M',
+        k: `${key}_deb_cntr`,
+        p: 2.5 + s.score * 0.25,
+        type: '토론반론',
+        tplId: 'deb_counter',
+        text: `${L0} 토론 당시 상대측이 제기한 가장 강력한 반론은 무엇이었고, 이를 어떤 논리로 재반박했나요?`,
+        tip: '상대 논리의 일리를 인정하고 내 주장의 전제와 근거를 들어 설득',
+        tails: ['지금 다시 토론한다면 어떤 새로운 근거를 보강하겠습니까?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'M',
+        k: `${key}_deb_neut`,
+        p: 2.3 + s.score * 0.2,
+        type: '토론절충',
+        tplId: 'deb_neutral',
+        text: `${L1} 양측의 극단적인 대립 속에서 양쪽 입장을 모두 고려한 현실적 절충안이나 대안을 제시해 보세요.`,
+        tip: '단순 타협이 아닌 양측의 핵심 가치를 포섭하는 제3의 대안 제시',
+        tails: ['그 절충안이 가져올 수 있는 부작용은 무엇인가요?']
+      })
+    );
+  }
+
+  // 6. Book (2 angles)
+  if (book) {
+    const L0 = lead(s, book.q, 0), L1 = lead(s, book.q, 1);
+    out.push(
+      Q({
+        b: f.read && s.rel ? 'C' : 'A',
+        k: `${key}_book_core`,
+        p: 2.4 + s.score * 0.25,
+        type: '독서비평',
+        tplId: 'book_core',
+        text: `${L0} ‘${book.q}’에서 저자가 던진 핵심 질문에 대해 본인은 어떻게 생각하며, 동의하지 않는 부분이 있다면 무엇인가요?`,
+        tip: '줄거리 나열 금지. 저자의 주장에 대한 본인의 주체적 평가 한 가지',
+        tails: ['그 책을 읽기 전과 읽은 후 본인의 생각은 어떻게 달라졌나요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'C',
+        k: `${key}_book_grow`,
+        p: 2.3 + s.score * 0.2,
+        type: '독서확장',
+        tplId: 'book_growth',
+        text: `${L1} ${josa(`‘${book.q}’`, '을/를')} 읽은 후 생긴 호기심을 다른 교과 탐구나 후속 활동으로 확장한 구체적 경험을 말씀해 주세요.`,
+        tip: '독서가 실천이나 심화 연구로 이어진 선순환 과정 제시',
+        tails: ['이와 관련해 대학 입학 후 찾아 읽고 싶은 전공 원서는 무엇인가요?']
+      })
+    );
+  }
+
+  // 7. Leadership & Conflict & Community
+  if (f.leader) {
+    const L0 = lead(s, anc, 0), L1 = lead(s, anc, 1);
+    out.push(
+      Q({
+        b: 'P',
+        k: `${key}_lead_conf`,
+        p: 2.6 + s.score * 0.2,
+        type: '리더십조율',
+        tplId: 'lead_conflict',
+        text: `${L0} 팀을 이끌며 구성원 간 의견 충돌이나 갈등이 발생했을 때 이를 어떤 대화 방식으로 조율했나요?`,
+        tip: '권위가 아닌 경청과 설득으로 합의를 이끌어낸 구체적 일화 제시',
+        tails: ['끝까지 설득되지 않은 팀원이 있었다면 어떻게 대처했나요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'P',
+        k: `${key}_lead_mot`,
+        p: 2.4 + s.score * 0.2,
+        type: '리더십동기',
+        tplId: 'lead_motivation',
+        text: `${L1} 활동에 소극적이거나 참여도가 낮은 팀원의 자발적 참여를 이끌어내기 위해 어떤 배려와 동기부여를 했나요?`,
+        tip: '해당 친구의 특기나 관심사를 파악해 역할을 부여한 세심한 리더십 강조',
+        tails: ['그 친구가 실제로 변화된 모습을 보여주었나요?']
+      })
+    );
+  }
+  if (f.conflict) {
+    const L0 = lead(s, anc, 0);
+    out.push(
+      Q({
+        b: 'P',
+        k: `${key}_conf_root`,
+        p: 2.8 + s.score * 0.2,
+        type: '갈등해결',
+        tplId: 'conf_root',
+        text: `${L0} 당시 갈등의 근본적인 원인은 무엇이었으며, 감정적 대립을 넘어 실질적인 합의를 이끌어낸 원칙은 무엇이었나요?`,
+        tip: '남 탓이 아닌 공통 목표 재확인을 통한 중재 과정 설명',
+        tails: ['지금 다시 같은 상황을 겪는다면 더 개선할 소통 방식은 무엇인가요?']
+      })
+    );
+  }
+  if (f.coop && !f.leader && !f.conflict) {
+    const L0 = lead(s, anc, 0);
+    out.push(
+      Q({
+        b: 'P',
+        k: `${key}_coop_role`,
+        p: 2.2 + s.score * 0.2,
+        type: '팀워크기여',
+        tplId: 'coop_role',
+        text: `${L0} 협업 과정에서 본인이 맡았던 고유한 역할은 무엇이었으며, 개인 작업을 넘어 팀 전체의 완성도를 높인 기여점은 무엇인가요?`,
+        tip: '‘우리’가 아닌 ‘내가’ 솔선수범해 팀의 빈틈을 메운 장면 제시',
+        tails: ['동료와의 협업을 통해 스스로 새롭게 배운 점은 무엇인가요?']
+      })
+    );
+  }
+  if (f.plan && !f.leader) {
+    const L0 = lead(s, anc, 0);
+    out.push(
+      Q({
+        b: 'P',
+        k: `${key}_plan_risk`,
+        p: 2.2 + s.score * 0.2,
+        type: '기획실행',
+        tplId: 'plan_risk',
+        text: `${L0} 활동을 기획하는 과정에서 예상치 못한 변수나 제약 조건을 극복하기 위해 어떤 현실적인 대안(Plan B)을 마련했나요?`,
+        tip: '치밀한 사전 준비성과 돌발 상황 대처 능력 강조',
+        tails: ['그 기획의 파급 효과는 참여자들에게 어떻게 나타났나요?']
+      })
+    );
+  }
+  if (s.sec === '행특') {
+    const t = s.text.replace(/\.$/, '');
+    const short = t.length > 70 ? t.slice(0, 68) + '…' : t;
+    out.push(
+      Q({
+        b: 'P',
+        k: `${key}_trait_inst`,
+        p: 2.4,
+        type: '행특사례',
+        tplId: 'trait_instance',
+        text: `${recordLabel(s)} 담임선생님께서 ‘${short}’라고 기재하셨는데, 본인의 어떤 구체적 행동 때문에 그렇게 평가하셨다고 생각하나요?`,
+        tip: '선생님의 칭찬을 담담하게 뒷받침할 수 있는 고교 생활 속 실천 사례 제시',
+        tails: ['그 인성적 강점이 대학 전공 학습과 단체 생활에 어떤 기여를 할까요?']
+      })
+    );
+  }
+
+  // 8. Career & Academic Growth (4 angles)
+  if (s.rel || s.area === '진로활동' || (topic && s.score > 2.5)) {
+    const L0 = lead(s, anc, 0), L1 = lead(s, anc, 1), L2 = lead(s, anc, 2), L3 = lead(s, anc, 3);
+    out.push(
+      Q({
+        b: 'C',
+        k: `${key}_exp_conn`,
+        p: 2.6 + s.score * 0.35 + s.rel * 0.4,
+        type: '전공연계',
+        tplId: 'exp_major_conn',
+        text: `${L0} 이 탐구에서 길러진 학업적 역량이 ${M}에 입학한 뒤 전공 과목을 수강하는 데 어떤 기초 체력이 될 것이라 보나요?`,
+        tip: '단순 흥미가 아닌, 실제 대학 커리큘럼(자료구조, 시스템 등)을 소화할 수 있는 역량 연결',
+        tails: ['그 역량을 대학 입학 전까지 더 보강하기 위한 계획이 있나요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'C',
+        k: `${key}_exp_acad`,
+        p: 2.5 + s.score * 0.3 + s.rel * 0.3,
+        type: '학업성장',
+        tplId: 'exp_academic_grow',
+        text: `${L1} 교과서 수준의 지식을 넘어 주도적으로 심화 탐구를 이어가게 만든 내적 동기는 무엇이었으며, 어떤 방식으로 지평을 넓혔나요?`,
+        tip: '호기심의 발생 순간과 이를 충족하기 위해 찾아본 원서·논문 등 지적 집요함 서술',
+        tails: ['그 심화 과정에서 가장 크게 깨달은 학문적 즐거움은 무엇인가요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'C',
+        k: `${key}_exp_curr`,
+        p: 2.3 + s.score * 0.25 + s.rel * 0.3,
+        type: '교과연계',
+        tplId: 'exp_curriculum',
+        text: `${L2} 이 활동에서 마주한 호기심을 ${M} 교육과정에 있는 특정 전공 과목이나 연구 분야와 연결해 설명해 주세요.`,
+        tip: '지원 학과의 1~2학년 전공기초 및 심화 과목명을 정확히 언급하며 학업 포부 제시',
+        tails: ['그 과목에서 특히 깊이 탐구하고 싶은 세부 토픽은 무엇인가요?']
+      })
+    );
+    out.push(
+      Q({
+        b: 'C',
+        k: `${key}_exp_goal`,
+        p: 2.2 + s.score * 0.2 + s.rel * 0.2,
+        type: '진로목표',
+        tplId: 'exp_research_goal',
+        text: `${L3} 대학 입학 후 학부 과정에서 이 주제를 더 발전시켜 진행해 보고 싶은 구체적인 연구 과제나 프로젝트가 있나요?`,
+        tip: '현실성 있는 학부 수준의 프로젝트 아이디어와 달성 목표 제시',
+        tails: ['그 연구를 성공시키기 위해 어떤 교수님의 연구실에 관심이 있나요?']
+      })
+    );
+  }
+
+  return out;
 }
 
-const FLAG_RE = {
-  inquiry: /(?:[가-힣]{0,2})(탐구|조사|분석|연구|고찰|규명|비교|검증|입증|문헌조사|데이터마이닝|통계처리)(?:[가-힣]{0,2})/,
-  experiment: /(?:[가-힣]{0,2})(실험|측정|관찰|변인|가설|오차|대조군|실험군)(?:[가-힣]{0,2})/,
-  make: /(?:[가-힣]{0,2})(제작|설계|코딩|구현|프로그램|앱|만들|구축|개발|모델링|시뮬레이션|창안|고안)(?:[가-힣]{0,2})/,
-  present: /(?:[가-힣]{0,2})(발표|설명함|소개함|강연|수업을 (?:기획|진행)|시연|브리핑|카드뉴스|포스터)(?:[가-힣]{0,2})/,
-  report: /(?:[가-힣]{0,2})(보고서|소논문|논술|에세이|글을 작성|서평|감상문|칼럼|기사|학술지)(?:[가-힣]{0,2})/,
-  debate: /(?:[가-힣]{0,2})(토론|찬반|반론|입론|반박|패널|디베이트)(?:[가-힣]{0,2})/,
-  read: /(?:[가-힣]{0,2})(읽고|도서|독서|서평|원서)(?:[가-힣]{0,2})/,
-  leader: /(?:[가-힣]{0,2})(반장|회장|부회장|부장|팀장|모둠장|조장|대표|리더|총괄)(?:[가-힣]{0,2})/,
-  conflict: /(?:[가-힣]{0,2})(갈등|의견\s*차이|의견을\s*조율|조율|중재|협의)(?:[가-힣]{0,2})/,
-  coop: /(?:[가-힣]{0,2})(협력|협업|협동|함께|팀원|모둠원|구성원|동료)(?:[가-힣]{0,2})/,
-  care: /(?:[가-힣]{0,2})(배려|봉사|나눔|도움|도와|멘토|멘티|도우미|튜터)(?:[가-힣]{0,2})/,
-  plan: /(?:[가-힣]{0,2})(기획|운영|캠페인|개선안|행사|프로젝트)(?:[가-힣]{0,2})/,
-  expand: /(?:[가-힣]{0,2})(나아가|심화|추가로|확장|더 나아가|후속|이어서|스스로|자발적|자기\s*주도|주도적|연계하여)(?:[가-힣]{0,2})/,
-  reflect: /(?:[가-힣]{0,2})(깨달|느낌|느꼈|인식|계기|성찰|반성|다짐)(?:[가-힣]{0,2})/,
-  trait: /(?:[가-힣]{0,2})(학생임|성품|태도가|인성|책임감|성실|정직|꾸준|끈기|배려심)(?:[가-힣]{0,2})/,
+// ============================================================
+// 7. 내장 기출 DB (`UNIV_Q`, `QB`, `CASES`) 연동 및 안전 필터
+// ============================================================
+const FIELD_KW: Record<string, string> = {
+  biz: '경영 경제 기업 마케팅 소비 시장 브랜드 광고 회계 금융 투자 무역 유통 창업 수요 공급 가격 ESG 산업',
+  hum: '문학 작품 언어 번역 역사 철학 문화 작가 소설 시 고전 어휘 문법',
+  soc: '사회 정책 제도 법 정치 행정 복지 인권 불평등 민주 시민 국제',
+  media: '미디어 광고 언론 기사 콘텐츠 영상 뉴스 홍보',
+  edu: '교육 수업 학습 교사 학생 멘토 가르 교실',
+  welfare: '복지 상담 아동 노인 청소년 가족 취약',
+  sci: '실험 원리 이론 수학 물리 화학 생명 지구 통계',
+  eng: '공학 설계 제작 회로 전기 전자 반도체 기계 에너지 소재 구조 로봇',
+  cs: '프로그램 코딩 알고리즘 데이터 인공지능 AI 소프트웨어 파이썬 앱 네트워크 보안',
+  nurse: '간호 환자 건강 질병 의료 병원 생명',
+  med: '의학 질병 환자 약 세포 면역 의료 생명',
+  health: '건강 재활 치료 의료 환자 보건',
+  bio: '생명 세포 유전 식품 미생물 바이오 효소 단백'
 };
 
-const PRED_WEAK_RE = /(이해함|이해하였음|이해하게 됨|이해도를 높임|파악함|알게 됨|알게 되었음|알게 되는 계기가 됨|깨달음|깨달았음|깨닫게 됨|느낌|느꼈음|느끼게 됨|인식함|배움|배웠음|학습함|체감함|실감함|공감함|되새김|다짐함|생각하게 됨|관심을 가짐|흥미를 느낌|계기가 됨|참여함|참석함|경청함|시야를 넓힘|안목을 넓힘|소중함을 앎|중요성을 앎|성찰함|반성함|익힘|습득함)\s*\.?$/;
-
-export interface CandidateQuestion {
-  key: string;
-  competency: CompetencyType;
-  type: 'record' | 'deep' | 'pressure' | 'university';
-  grade?: string;
-  subject?: string;
-  highlightText?: string;
-  question: string;
-  intent: string;
-  points: string[];
-  followUps: string[];
-  defense?: string;
-  score: number;
+export function fieldsOf(major?: string): any[] {
+  return major ? FIELDS.filter((f) => f.re.test(major)) : [];
 }
 
-/**
- * 학생부 59개 전 기록에서 비중복 문항 후보 풀(Candidate Pool)을 생성 (보통 150~300개 생성)
- */
-export function buildRuleCandidatePool(
-  records: StudentRecordItem[],
-  major: string,
-  univ: string,
-  customKeywords?: string[]
-): CandidateQuestion[] {
-  const pool: CandidateQuestion[] = [];
-  const M = major || '지원 학과';
-  const U = univ || '지원 대학';
+const PAST_ACTIVITY_RE = /(?:[가-힣]*(?:했|하였|았|었|였|셨|됐|갔|봤|왔|났|탔|섰|앉|있|없)(?:는데|으며|고|네요|더군요|다던데|다고|던|어요|었나요|었지요|나요|군요|지요|습니까|습니다|다면서요|다는데|라는데|라던데|대요|래요)|(?:작성|진행|발표|연구|탐구|제작|수행|조사|설계|참여|제출|언급|개발|기획|활동)한|(?:만든|배운|읽은|들은|맡은|나간)|적혀|기록되|기록이|되어 ?있|생기부|학생부|세특|개세특|보니까|보니|들었는데|읽으셨는데|활동했던|(?:[1-3]학년|[1-3]학년도|동아리|진로활동|자율활동|봉사활동|수업\s*시간|교과\s*시간|보고서|소논문|발표대회|탐구보고서))/;
 
-  const dynamicKeywords = extractFrequentKeywords(records, customKeywords);
+const GENERIC_SUBJECT_NOUNS = new Set([
+  '수학', '과학', '물리', '화학', '생명', '지구', '정보', '국어', '영어', '사회',
+  '교과', '수업', '과목', '학교', '학생', '자신', '본인', '친구', '동아리',
+  '컴퓨터', '인공지능', '프로그래밍', '파이썬', '알고리즘', '데이터', '소프트웨어',
+  '코딩', '모둠', '팀원', '역할', '활동', '탐구', '실험', '결과', '과정', '이유'
+]);
 
-  records.forEach((rec, rIdx) => {
-    const cleanRaw = rec.text.replace(/<[^>]+>/g, '');
-    const rawSentences = cleanRaw
-      .replace(/([가-힣)'’"”])\.\s*(?=[가-힣A-Za-z'‘"“(\[<0-9])/g, '$1.\n')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length >= 5);
+export function checkForeignProject(qStr: string, recTxt: string): boolean {
+  const projMatches = [...qStr.matchAll(/([가-힣A-Za-z0-9]{2,12})\s*(?:프로그램|시스템|프로젝트|모델|장치|키트|기기|로봇|어플|앱|게임|센서|회로|활동|실험|보고서|소논문|동아리|대회|기업|회사|플랫폼|서비스|알고리즘)/g)];
+  for (const m of projMatches) {
+    const noun = m[1].trim();
+    if (/^[1-3]학년(?:도)?$/.test(noun)) continue;
+    if (!GENERIC_SUBJECT_NOUNS.has(noun) && !recTxt.includes(noun)) {
+      return false;
+    }
+  }
 
-    // 종속 접속사로 시작하는 문장은 직전 문장과 병합(Merge)하여 맥락 단절 방지
-    const CONJUNCTION_MERGE_RE = /^(이를 위해|이를 바탕으로|이를 통해|그 결과|이에 따라|이에|따라서|이후|이어|이 과정에서|이를 해결하기 위해|이를 개선하기 위해|더 나아가|나아가)\s*,?\s*/;
+  const actMatches = [...qStr.matchAll(/([가-힣A-Za-z0-9]{2,12})(?:을|를|에 대해|에 관한|에서)\s*(?:제작|만들|설계|구현|작성|수행|진행|개발|조사|탐구|분석)/g)];
+  for (const m of actMatches) {
+    const noun = m[1].trim();
+    if (/^[1-3]학년(?:도)?$/.test(noun)) continue;
+    if (!GENERIC_SUBJECT_NOUNS.has(noun) && !recTxt.includes(noun)) {
+      return false;
+    }
+  }
+  return true;
+}
 
-    const sentences: string[] = [];
-    for (let i = 0; i < rawSentences.length; i++) {
-      const cur = rawSentences[i];
-      if (CONJUNCTION_MERGE_RE.test(cur) && sentences.length > 0) {
-        const prev = sentences[sentences.length - 1];
-        sentences[sentences.length - 1] = prev.replace(/\.?$/, ', ') + cur;
-      } else {
-        sentences.push(cur);
+export function isQuestionFieldCompatible(qStr: string, targetMajor: string, recTxt: string): boolean {
+  const isCS = /컴퓨터|소프트웨어|SW|인공지능|AI|데이터|정보|보안|전자|전기|ICT/.test(targetMajor);
+  if (isCS) {
+    const PURE_OTHER_RE = /(?:화학\s*분야|화학과|화학공학|시그마.*파이|오비탈|이온화\s*에너지|화학\s*평형|의예과|간호사|간호학과|유치원\s*교사|초등교사|사범대|시각\s*디자인|미술관|사회복지사|문학\s*작품|어문학)/;
+    if (PURE_OTHER_RE.test(qStr)) {
+      const m = qStr.match(PURE_OTHER_RE);
+      if (m && !recTxt.includes(m[0])) return false;
+    }
+  }
+
+  const isBiz = /경영|경제|상경|무역|통상|회계|세무|금융|마케팅|비즈니스/.test(targetMajor);
+  if (isBiz) {
+    const PURE_STEM_RE = /(?:코딩|파이썬|알고리즘|회로|물리학|화학|생명과학|지구과학|의예|간호|미적분|역학|유전자|반도체)/;
+    if (PURE_STEM_RE.test(qStr)) {
+      const m = qStr.match(PURE_STEM_RE);
+      if (m && !recTxt.includes(m[0])) return false;
+    }
+  }
+  return true;
+}
+
+function cleanNoun(w: string): string {
+  return w.replace(/(에서|으로|에게|이라는|라는|이란|이라|와의|과의|에는|에도|까지|부터|처럼|보다|이나|이며|이고|하고|하는|하게|하며|했던|했고|했는데|했다|이다|에|은|는|이|가|을|를|의|와|과|도|로|만|요)$/, '');
+}
+
+export function isValidAnswerMatch(qText: string, ansText: string | null): boolean {
+  if (!ansText || !qText) return false;
+  const cleanAns = ansText.trim();
+  if (/^[∙•·-]/.test(cleanAns)) return false;
+  if (/^(?:산업공학과|컴퓨터공학과|물리학과|의예과|기계공학과|경영학과|행정학과)\s*[•∙·-]/.test(cleanAns)) return false;
+
+  const rawWords = qText.match(/[가-힣A-Za-z0-9]{2,}/g) || [];
+  const STOP_WORDS = new Set(['질문', '답변', '생각', '학생', '본인', '자신', '우리', '설명', '이유', '대해', '관련', '통해', '가장', '어떤', '어떻게', '무엇', '개념']);
+  const qNouns = rawWords.map(cleanNoun).filter((w) => !STOP_WORDS.has(w) && w.length >= 2);
+
+  return qNouns.some((n) => cleanAns.includes(n));
+}
+
+export function isMajorCompatible(dept: string, targetMajor: string, flds: any[]): boolean {
+  if (!dept) return true;
+  const cleanDept = dept.replace(/자[유율]전공/g, '').trim();
+  const mk = targetMajor.replace(/(학과|학부|전공|과|계열)$/, '');
+  if (mk && (dept.includes(mk) || mk.includes(dept.replace(/(학과|학부|전공|과|계열)$/, '')))) return true;
+
+  const isTargetCS = /컴퓨터|소프트웨어|SW|인공지능|AI|데이터|정보|보안/.test(targetMajor);
+  if (isTargetCS) {
+    return /컴퓨터|소프트웨어|SW|인공지능|AI|데이터|정보|보안|전산|ICT|IT|전자|전기/.test(cleanDept);
+  }
+
+  if (flds && flds.some((f) => f.re.test(cleanDept))) return true;
+  return false;
+}
+
+export function stripQPrefix(str: string): string {
+  let s = (str || '').trim();
+  const PREFIX_RE = /^\s*(?:(?:\d+(?:-\(?\d+\)?|\.\d+)?|Q\d*)\s*[.):-]|(?:\(\d+\)|\[\d+\]|[①-⑮]))\s*/i;
+  while (PREFIX_RE.test(s)) {
+    const next = s.replace(PREFIX_RE, '').trim();
+    if (next === s || next.length === 0) break;
+    s = next;
+  }
+  return s.replace(/^[-•·▶]\s*/, '').replace(/^질문\s*[:：]?\s*/i, '').trim();
+}
+
+const NOISE_RE = /(?:기억(?:은|이)?\s*안|기억(?:나지|이\s*나지)|잘\s*기억|고사실|대기실|입실|착석|퇴실|면접관|진행방식|후기|분위기|팁|꿀팁|생략|^\(?꼬리|모르겠|질문\s*없음|자소서|자기\s*소개서|생기부\s*질문|생기부\s*관련|교과\s*질문|전공\s*질문|답변\s*못함|말씀을 들어보니|기억(?:이|은)?\s*나나요|기억나나요|기억\s*나시나요|바운\s*지|바운\s*거)/i;
+const QUESTION_CHECK_RE = /(?:\?|인가요|무엇인가요|어떤가요|설명해\s*(?:보세요|주세요|바랍니다|볼래요)|말해\s*(?:보세요|주세요|봐요)|있나요|했나요|있었나요|했었나요|되었나요|있는지|했는지|어떻게|이유는|이유가|까\?|요\?|나\?|은\?|는\?|어떤|무엇|왜)/;
+
+export function isCleanQuestion(qStr: string, recTxt: string, validKeywords: string[], targetMajor: string): boolean {
+  if (!qStr || qStr.length < 14 || qStr.length > 200) return false;
+  if (NOISE_RE.test(qStr)) return false;
+  if (/^<.*>$/.test(qStr.trim())) return false;
+  if (!QUESTION_CHECK_RE.test(qStr)) return false;
+
+  if (/^(?:무엇|어떤\s*것|어떻게|왜)\s*(?:이라고|라고)?\s*(?:생각하나요|보나요|생각합니까)\??$/.test(qStr.trim())) return false;
+
+  const qQuotes = qStr.match(/[‘'"“「『<《]([^’'"”」』>》]{2,100})[’'"”」』>》]/g);
+  if (qQuotes) {
+    for (const qq of qQuotes) {
+      const cleanQQ = qq.replace(/[‘'"“「『<《’'"”」』>》]/g, '').trim();
+      if (cleanQQ.length >= 2 && !recTxt.includes(cleanQQ)) {
+        return false;
       }
     }
+  }
 
-    const validSentences = sentences.filter((s) => s.length >= 15);
+  const deptMatch = qStr.match(/([가-힣]{2,10}(?:학과|학부))/);
+  if (deptMatch && targetMajor) {
+    const mk = targetMajor.replace(/(학과|학부|전공|과|계열)$/, '');
+    if (!deptMatch[1].includes(mk) && !mk.includes(deptMatch[1].replace(/(학과|학부|전공|과|계열)$/, ''))) {
+      return false;
+    }
+  }
 
-    validSentences.forEach((sent, sIdx) => {
-      const f: Record<string, boolean> = {};
-      for (const k in FLAG_RE) {
-        f[k] = (FLAG_RE as any)[k].test(sent);
+  if (targetMajor && !isQuestionFieldCompatible(qStr, targetMajor, recTxt)) {
+    return false;
+  }
+
+  if (/실험/.test(qStr) && !recTxt.includes('실험')) {
+    return false;
+  }
+
+  if (!checkForeignProject(qStr, recTxt)) {
+    return false;
+  }
+
+  if (PAST_ACTIVITY_RE.test(qStr)) {
+    const hit = validKeywords.some((kw) => hasTerm(qStr, kw));
+    if (!hit) return false;
+  }
+  return true;
+}
+
+export function splitCaseQs(qTxt: string, aTxt: string, recTxt: string, validKeywords: string[], targetMajor: string): Array<{ qText: string; ans: string | null }> {
+  if (!qTxt) return [];
+  const qLines = qTxt.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const pairs: Array<{ qText: string; ans: string | null }> = [];
+  for (const ql of qLines) {
+    const cleanQ = stripQPrefix(ql);
+    if (!isCleanQuestion(cleanQ, recTxt, validKeywords, targetMajor)) continue;
+
+    let matchedAns: string | null = null;
+    const numMatch = ql.match(/^\s*([0-9]+(?:-[0-9]+|\([0-9]+\))?)\s*[.)]/);
+    if (numMatch && aTxt) {
+      const qNum = numMatch[1].replace(/[()]/g, '');
+      const re = new RegExp('(?:^|[\\r\\n]+)\\s*' + qNum.replace('-', '\\-') + '\\s*[.)]\\s*([\\s\\S]*?)(?=(?:[\\r\\n]+\\s*[0-9]+(?:-[0-9]+|\\([0-9]+\\))?\\s*[.)])|$)');
+      const am = aTxt.match(re);
+      if (am && am[1].trim()) {
+        matchedAns = am[1].trim();
       }
-      const concepts = findConcepts(sent, dynamicKeywords);
-      const quotes: string[] = [];
-      const qre = /[‘'"“「『<《]([^’'"”」』>》]{2,70})[’'"”」』>》]/g;
-      let qm;
-      while ((qm = qre.exec(sent)) !== null) {
-        quotes.push(qm[1].trim());
+    }
+    pairs.push({ qText: cleanQ, ans: matchedAns });
+  }
+  return pairs;
+}
+
+const TAIL_SPLIT_RE = /(?:기록되어 있습니다|기록이 있습니다|기록되어 있는데|기록이 있는데|기록되었습니다|활동을 했는데|발표했다고 기록되어 있습니다|발표했다고 되어 있는데|작성했다고 기록되어 있습니다|언급해 주었는데|언급되어 있는데|있다는 내용이 있는데|제시했다는 내용이 있는데|기록이 있네요|작성했다고 하는데|탐구했다고 하는데|조사했다고 기록되어 있습니다|조사했다고 하는데|발표한 기록이 있는데|보고서를 작성했는데요|보고서에 대한 내용이 있는데|했다고 하는데요|했다고 하는데|활동을 하였네요|활동을 하였는데|활동을 하였는데,|추가탐구를 하였는데요|설명했다는 기록이 있네요|설명했다는 내용이 있네요)[.,]?\s*/;
+
+export function extractUnivQTails(univ: string, pastData?: PastExamData | null): Array<{ cat: string; b?: 'A' | 'C' | 'P'; tail: string; orig: string; head: string }> {
+  const data = pastData || getPastExamData();
+  const d = data && data.UNIV_Q && data.UNIV_Q[univ] ? data.UNIV_Q[univ] : {};
+  const tails: Array<{ cat: string; b?: 'A' | 'C' | 'P'; tail: string; orig: string; head: string }> = [];
+  for (const [cat, qs] of Object.entries(d)) {
+    for (const q of qs) {
+      const parts = q.split(TAIL_SPLIT_RE);
+      if (parts.length > 1) {
+        let tail = parts[1].trim().replace(/^[.,\s]+/, '');
+        tail = tail.replace(/^(?:요|네|그렇다면|그러면)[,\s]*/, '');
+        if (tail.length >= 12) {
+          tails.push({ cat, tail, orig: q, head: parts[0].trim() });
+        }
       }
-      const anchor = quotes[0] || (concepts[0] && concepts[0].term) || null;
-      const L = makeLead(rec, sent, anchor);
-      const key = `rec_${rIdx}_${sIdx}`;
+    }
+  }
+  return tails;
+}
 
-      // 약한 서술어 감점 완화: 활동의 구체성을 띠는 핵심 명사(따옴표, 개념어, 실험, 탐구)가 있으면 대폭 완화
-      const isWeakPred = PRED_WEAK_RE.test(sent);
-      const hasSpecificContent = quotes.length > 0 || concepts.length > 0 || f.inquiry || f.experiment || f.make;
-      const predPenalty = isWeakPred ? (hasSpecificContent ? -0.8 : -9.0) : 0;
+export function matchCases(univ: string, major: string, field: any, pastData?: PastExamData | null): Array<{ i: number; s: number; r: any }> {
+  const data = pastData || getPastExamData();
+  const cases = data ? data.CASES : [];
+  if (!cases || !cases.length) return [];
+  const mk = (major || '').replace(/(학과|학부|전공|과|계열)$/, '');
+  const scored = cases
+    .map((r, i) => {
+      let s = 0;
+      if (univ && r[0] === univ) s += 3;
+      if (mk && r[2].includes(mk)) s += 4;
+      else if (mk && mk.length >= 2 && mk.slice(0, 2) && r[2].includes(mk.slice(0, 2))) s += 1.5;
+      if (field && field.re.test(r[2])) s += 1.5;
+      return { i, s };
+    })
+    .filter((x) => x.s >= 3)
+    .sort((a, b) => b.s - a.s);
+  return scored.map((x) => ({ ...x, r: cases[x.i] }));
+}
 
-      // 1. 학업 역량 (개념, 실험, 탐구, 보고서, 공학/제작)
-      if (concepts.length > 0) {
-        concepts.slice(0, 2).forEach((c, ci) => {
-          const isCustom = c.isCustom;
-          pool.push({
-            key: `${key}_c_${ci}`,
-            competency: 'academic',
-            type: 'deep',
-            grade: rec.grade,
-            subject: rec.subject,
-            highlightText: sent,
-            score: (isCustom ? 4.3 : 3.8) + predPenalty,
-            question: isCustom
-              ? `${makeLead(rec, sent, c.term)} 핵심 키워드인 '${c.name}'에 관해 어떤 배경에서 집중 탐구하게 되었으며, 이를 통해 얻은 핵심적인 학업적 성과는 무엇인가요?`
-              : `${makeLead(rec, sent, c.term)} '${c.name}'의 핵심 개념과 원리를 설명해 주세요.`,
-            intent: `${rec.subject}에서 다룬 '${c.name}'의 학술적 개념 이해도 및 학업 역량 검증`,
-            points: [
-              `'${c.name}'의 정확한 정의와 과학적/학문적 원리 설명`,
-              c.def
-                ? `핵심 원리: ${c.def.slice(0, 90)}…`
-                : '실제 탐구 활동에서 이 원리가 어떻게 적용되었는지 구체적 언급',
-              '전공 학습으로 이어지는 해당 개념의 중요성 피력',
-            ],
-            followUps: [
-              `'${c.name}' 원리가 실생활이나 ${M} 관련 최신 산업/연구 기술에 어떻게 적용될 수 있는지 구체적 사례를 들어 설명해 보세요.`,
-              `'${c.name}' 탐구를 진행하면서 이론과 실제 데이터 간의 차이점이나 가장 이해하기 어려웠던 지점은 무엇이었나요?`,
-            ],
-          });
-        });
+export const QB_KIND = ['면접후기', '학과별 기출', '인적성·MMI', '제시문·구술', '가이드 예시'];
+const QB_STOP = new Set('그리고 그러면 그럼 무엇 어떤 어떻게 생각 이유 설명 본인 자신 가장 활동 경험 대해 관련 통해 학생 지원 학과 질문 내용 과목 교과 학교 노력 과정 결과 사실 구체적 의미 말씀 부분 혹시 진로 배운 느낀 점은 점이 점을 계기 동기 이야기 하고 싶은 것을 것이 것은 있다면 무엇이 중요 필요 방법 사람 이런 그런 저런 여러 다른 많이 조금 정말 혹시 지금 나중 이후 이전 이상 이하'.split(' '));
+const QB_REF = /(적혀|기록되|기록이|되어 ?있|했는데|했네요|하셨는데|하셨네요|했던데|읽었는데|생기부|학생부|세특|보니까|보니|탐구했|했다고|하셨다고|말했는데|했다는데|쓰여|아까|방금)/;
+
+export function qbNouns(t: string): string[] {
+  return [
+    ...new Set(
+      (t.match(/[가-힣A-Za-z0-9]{2,}/g) || [])
+        .map((w) =>
+          w.replace(
+            /(에서|으로|에게|이라는|라는|이란|이라|와의|과의|에는|에도|까지|부터|처럼|보다|이나|이며|이고|하고|하는|하게|하며|했던|했고|했는데|했다|이다|에|은|는|이|가|을|를|의|와|과|도|로|만|요)$/,
+            ''
+          )
+        )
+        .filter((w) => w.length >= 2 && !QB_STOP.has(w))
+    )
+  ];
+}
+
+export function qbMatch(
+  univ: string,
+  major: string,
+  flds: any[],
+  kw: string[],
+  recText: string,
+  pastData?: PastExamData | null,
+  opts: { pool?: boolean; min?: number } = {}
+): Array<{ i: number; s: number; r: any }> {
+  const data = pastData || getPastExamData();
+  const qb = data ? data.QB : { S: [], U: [], R: [] };
+  if (!qb || !qb.R || !qb.R.length) return [];
+
+  const mk = (major || '').replace(/(학과|학부|전공|과|계열)$/, '');
+  const ui = qb.U.indexOf(univ || '@@');
+  const med = /의예|의학|치의|한의|약학|수의|간호/.test(major || '');
+  const teach = /교육|교대|사범|유아|초등/.test(major || '') || /교육대학교|교원대/.test(univ || '');
+  const rec = recText || '';
+  const kwl = (kw || []).filter((k) => k.length >= 2).slice(0, 40);
+  const out: Array<{ i: number; s: number; r: any }> = [];
+
+  for (let i = 0; i < qb.R.length; i++) {
+    const r = qb.R[i];
+    if (opts.pool && (r[8] || r[4] === 3 || (r[4] === 4 && !r[2]))) continue;
+    if (opts.pool && r[4] === 2 && !(med || teach) && !/협력|갈등|배려|봉사|리더|공동체|인성|윤리|도움|소통|소외|규칙|규정|정직|도덕|가치|태도/.test(r[0])) continue;
+    let s = 0;
+    if (ui >= 0 && r[1] === ui) s += 3;
+    const m = r[2] || '';
+    if (mk && m) {
+      if (m.includes(mk) || mk.includes(m.replace(/(학과|학부|전공|과|계열)$/, ''))) s += 4;
+      else if (mk.length >= 2 && m.includes(mk.slice(0, 2))) s += 1.5;
+      else if (flds && flds.some((f) => f.re.test(m))) s += 1.5;
+    }
+    if (r[4] === 2 && ((med && /의|약|간호|MMI|인적성/.test(qb.S[r[5]] + m)) || (teach && /교원|교직|교육/.test(qb.S[r[5]] + m)))) s += 3;
+    let hit = 0;
+    if (rec || kwl.length) {
+      const ns = qbNouns(r[0]);
+      for (const n of ns) {
+        if (n.length >= 2 && rec.includes(n)) hit += n.length >= 3 ? 1 : 0.5;
+        else if (kwl.some((k) => k === n)) hit += 0.4;
       }
+    }
+    s += Math.min(hit, 4);
+    if (/협력|갈등|배려|봉사|리더|공동체|팀|친구|구성원|학급|동료|멘토|나눔|기여|규칙|인성|도움|화합|타인|소통|양보|인간관계|사회생활|생활|어려움|대처|프리라이더|존경|역할|조율|경청|수업/.test(r[0])) {
+      s += 1.5;
+    }
+    if (opts.pool && QB_REF.test(r[0]) && hit < 2) continue;
+    if (!opts.pool && r[8]) s -= 1;
+    if (s >= (opts.min || 2)) out.push({ i, s, r });
+  }
 
-      if (f.experiment) {
-        const expAnchor = anchor || '해당 실험';
-        pool.push({
-          key: `${key}_exp`,
-          competency: 'academic',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.5 + predPenalty,
-          question: `${L} 실험에서 조작한 독립변인과 통제변인은 무엇이었으며, 예상과 달랐던 결과나 오차 원인이 있었다면 어떻게 분석했나요?`,
-          intent: '과학적 탐구 방법론의 이해도 및 데이터 해석, 문제 해결 능력 검증',
-          points: [
-            '가설 설정 - 변인 통제 - 실험 결과의 인과관계 논리적 정리',
-            '실험 과정에서 발생한 오차의 원인과 이를 해결하기 위한 노력',
-            '실험을 다시 수행한다면 개선하고 싶은 설계 방향',
-          ],
-          followUps: [
-            `'${expAnchor}' 진행 중 통제변인이 엄격히 통제되지 못했을 가능성이나, 발생할 수 있는 계통 오차는 무엇이었나요?`,
-            `실험 결과 도출 후, 이를 이론값이나 다른 선행 연구 결과와 비교해 보았나요?`,
-          ],
-        });
-      }
+  out.sort((a, b) => b.s - a.s);
+  return out;
+}
 
-      if (f.inquiry || f.report) {
-        const topicName = quotes[0] || (concepts[0] && concepts[0].term) || '해당 탐구';
-        pool.push({
-          key: `${key}_inq`,
-          competency: 'academic',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.2 + predPenalty,
-          question: `${L} ‘${topicName}’에서 도출한 핵심 결론은 무엇이며, 어떤 근거 자료를 바탕으로 신뢰할 수 있다고 판단했나요?`,
-          intent: '주도적 탐구 역량 및 문헌·자료의 비판적 분석력 검증',
-          points: [
-            '두괄식으로 핵심 결론 명확히 제시',
-            '결론을 뒷받침하는 2가지 이상의 객관적 근거 자료',
-            '탐구 과정에서 겪은 한계점과 이를 극복한 방법',
-          ],
-          followUps: [
-            `‘${topicName}’ 탐구에서 가장 신뢰할 만하다고 판단한 핵심 근거 자료(문헌·데이터)는 무엇이었나요?`,
-            `다시 동일한 주제로 심화 연구를 수행한다면, 기존 탐구의 어떤 한계점을 보완하고 싶나요?`,
-          ],
-        });
-      }
+export function classifyText(q: string): 'A' | 'C' | 'P' | 'M' | 'D' {
+  if (/협력|갈등|배려|봉사|리더|공동체|팀|친구|구성원|학급|동료|멘토|나눔|기여|규칙|인성|도움|화합|타인|소통|양보|인간관계|사회생활|생활|어려움|대처|프리라이더|존경|역할|조율|경청|수업/.test(q)) return 'P';
+  if (/지원|진로|전공|학과|입학 후|졸업|꿈|장래|목표|희망|직업/.test(q)) return 'C';
+  if (/성장|극복|실패|스스로|계획|발전|노력/.test(q)) return 'D';
+  if (/요약|설득|토론|입장|찬반/.test(q)) return 'M';
+  return 'A';
+}
 
-      if (f.make) {
-        const makeAnchor = anchor || '해당 결과물';
-        pool.push({
-          key: `${key}_make`,
-          competency: 'academic',
-          type: 'deep',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.0 + predPenalty,
-          question: `${L} 제작한 결과물이 어떤 메커니즘과 원리로 작동하는지, 다른 대안 대신 이 방식을 택한 이유를 설명해 주세요.`,
-          intent: '공학적 설계 역량 및 기술적 의사결정의 논리성 검증',
-          points: [
-            '결과물의 핵심 작동 알고리즘/원리 설명',
-            '기존 방식과의 차별점 및 선정 이유',
-            '직접 수행한 부분과 라이브러리/기존 자료 활용 부분의 명확한 구분',
-          ],
-          followUps: [
-            `'${makeAnchor}' 제작 시 기존 오픈소스/라이브러리를 활용한 부분과 직접 알고리즘을 설계·구현한 부분을 구분해 설명해 주세요.`,
-            `성능이나 효율성 측면에서 예상보다 아쉬웠던 점은 무엇이었으며, 어떻게 개선할 수 있을까요?`,
-          ],
-        });
-      }
+function mulberry(seed: number) {
+  let s = seed >>> 0;
+  return function () {
+    let t = (s += 0x6D2B79F5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
-      // 2. 진로 역량 (전공 연결, 동기, 심화 확장)
-      if (rec.subject.includes('진로') || f.expand || quotes.length > 0) {
-        const linkTopic = quotes[0] || (concepts[0] && concepts[0].term) || '해당 활동';
-        pool.push({
-          key: `${key}_car_link`,
-          competency: 'career',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.3 + predPenalty,
-          question: `${L} 이 활동이 ${M} 전공 학습과 어떻게 이어진다고 생각하며, 대학 입학 후 어떤 세부 연구나 과목으로 발전시키고 싶나요?`,
-          intent: '전공 적합성 및 고교 활동과 대학 학업 간의 연계성 검증',
-          points: [
-            '고교 활동에서 느낀 지적 호기심 요약',
-            `${M}의 구체적인 전공 커리큘럼이나 연구 분야와 연결`,
-            '입학 후 자기주도적 학업 계획 피력',
-          ],
-          followUps: [
-            `'${linkTopic}'에 대한 관심이 처음 생긴 결정적인 계기는 무엇이었나요?`,
-            `대학 입학 후 ${M}에서 이와 관련해 가장 먼저 수강하고 싶은 전공 심화 과목은 무엇인가요?`,
-          ],
-        });
-      }
+// ============================================================
+// 8. 룰 엔진 후보 풀 빌더 (buildRuleCandidatePool)
+// ============================================================
+export function buildRuleCandidatePool(
+  records: StudentRecordItem[],
+  targetMajor: string,
+  targetUniversity: string,
+  customKeywords?: string[],
+  pastData?: PastExamData | null
+): CandidateQuestion[] {
+  const U = targetUniversity || '지원 대학';
+  const M = targetMajor || '지원 학과';
+  const univShort = U.replace(/대학교$/, '대');
+  const flds = fieldsOf(M);
+  const fld = flds[0] || null;
 
-      if (quotes[0]) {
-        pool.push({
-          key: `${key}_car_topic`,
-          competency: 'career',
-          type: 'deep',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 2.9 + predPenalty,
-          question: `${L} 수많은 주제 가운데 특별히 ‘${quotes[0]}’${hasBatchim(quotes[0]) ? '을' : '를'} 선택한 결정적인 이유는 무엇인가요?`,
-          intent: '진로 탐색의 진정성 및 주제 선정의 독창성 검증',
-          points: [
-            '단순한 관심이 아닌 구체적인 경험이나 계기 제시',
-            '이 주제를 통해 규명하고자 했던 문제의식',
-            '탐구 후 진로 목표에 미친 영향',
-          ],
-          followUps: [
-            `‘${quotes[0]}’ 관련 활동을 진행하면서 저자의 생각이나 기존 통념에 비판적으로 의문을 품었던 지점이 있나요?`,
-            `이 주제가 본인이 희망하는 ${M} 진로에 어떤 확신을 주었나요?`,
-          ],
-        });
-      }
+  // 1. StudentRecordItem[]을 구조화된 SentenceItem[] 및 recs로 변환
+  const recs = records.map((r, ri) => {
+    let sec: '교과' | '창체' | '행특' | '독서' | '기타' = '교과';
+    if (r.type === '창의적 체험활동' || /진로|자율|동아리|봉사/.test(r.subject)) sec = '창체';
+    else if (r.type === '행동특성및종합의견' || /행특|종합의견/.test(r.subject)) sec = '행특';
+    else if (r.type === '독서활동' || /독서/.test(r.subject)) sec = '독서';
 
-      // 3. 공동체 역량 (리더십, 갈등 중재, 협업, 배려, 행동특성)
-      if (f.leader) {
-        pool.push({
-          key: `${key}_p_lead`,
-          competency: 'community',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.4 + predPenalty,
-          question: `${L} 그 역할을 수행하면서 가장 어려웠던 점은 무엇이었고, 팀원들의 자발적 참여를 이끌어내기 위해 어떤 리더십을 발휘했나요?`,
-          intent: '공동체 리더십 및 솔선수범 태도, 조직 운영 역량 검증',
-          points: [
-            '직책 자체보다 실제 직면했던 조직 내 문제 상황 구체화',
-            '권위적 지시가 아닌 소통과 배려를 통한 해결 과정',
-            '협업의 성공 결과와 팀원들의 변화',
-          ],
-          followUps: [
-            '구성원 중 끝까지 협조하지 않는 사람이 있었다면 어떻게 대처했나요?',
-            '그 경험을 통해 리더에게 가장 중요한 자질이 무엇이라고 생각하게 되었나요?',
-          ],
-        });
-      }
+    const gMatch = (r.grade || '').match(/([123])/);
+    const grade = gMatch ? +gMatch[1] : 1;
+    const area = sec === '창체' ? r.subject : undefined;
+    const subj = sec === '교과' ? r.subject : undefined;
 
-      if (f.conflict) {
-        pool.push({
-          key: `${key}_p_conf`,
-          competency: 'community',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.6 + predPenalty,
-          question: `${L} 당시 발생했던 의견 대립의 본질은 무엇이었으며, 양측의 입장을 조율하여 합의를 이끌어낸 본인만의 구체적 행동은 무엇이었나요?`,
-          intent: '갈등 관리 능력 및 상호 존중 의사소통 역량 검증',
-          points: [
-            '누구의 잘잘못이 아닌 관점의 차이를 객관적으로 서술',
-            '경청과 중재를 통해 제시한 합리적 절충안',
-            '갈등 해결을 통해 공동체에 기여한 가치',
-          ],
-          followUps: [
-            '지금 다시 그 상황을 마주한다면 다르게 행동할 점이 있습니까?',
-            '갈등을 해결한 후 팀의 분위기나 결과물에 어떤 긍정적 변화가 생겼나요?',
-          ],
-        });
-      }
+    return {
+      id: r.id || `rec-${ri}`,
+      sec,
+      grade,
+      area,
+      subj,
+      text: r.text
+    };
+  });
 
-      if (f.care || f.coop) {
-        pool.push({
-          key: `${key}_p_coop`,
-          competency: 'community',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 2.7 + predPenalty,
-          question: `${L} 모둠 활동에서 본인이 맡았던 핵심 역할과, 협업 과정에서 어려움을 겪는 동료를 돕기 위해 실천한 행동을 말씀해 주세요.`,
-          intent: '팀워크 및 나눔과 배려, 공동체적 책임 의식 검증',
-          points: [
-            '‘우리’가 아닌 ‘내가’ 솔선해서 수행한 역할',
-            '동료와의 소통 과정에서 배려한 구체적 장면',
-            '함께 이룬 성과의 의미',
-          ],
-          followUps: [
-            '그 경험을 통해 자신에게 가장 크게 달라진 점은 무엇인가요?',
-            '동료의 입장에서는 본인의 배려를 어떻게 느꼈을 것이라고 생각하나요?',
-          ],
-        });
-      }
+  const quotesList: string[] = [];
+  const qre = /[‘'"“「『<《]([^’'"”」』>》]{2,70})[’'"”」』>》]/g;
+  recs.forEach((r) => {
+    let m: RegExpExecArray | null;
+    while ((m = qre.exec(r.text))) {
+      quotesList.push(m[1].trim());
+    }
+  });
 
-      if (rec.type === '행동특성및종합의견') {
-        pool.push({
-          key: `${key}_p_bh`,
-          competency: 'community',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 3.1 + predPenalty,
-          question: `(${rec.grade} 행동특성 및 종합의견) 담임선생님께서 ‘${sent.slice(0, 50)}…’라고 긍정적으로 평가해 주셨는데, 본인의 어떤 평소 태도와 구체적 행동 때문이라고 생각하나요?`,
-          intent: '학교생활 성실성 및 인성, 자아 성찰 역량 검증',
-          points: [
-            '선생님의 평가와 부합하는 일상적인 학교생활 실천 사례',
-            '꾸준히 지키고자 노력했던 자신만의 생활 원칙',
-            '대학 입학 후 대학 공동체 생활에 기여할 수 있는 부분',
-          ],
-          followUps: [
-            '그 태도가 대학 입학 후 공동체 생활에서 어떻게 발휘될 수 있을까요?',
-            '선생님의 이러한 평가가 본인의 자아 인식과 가치관 형성에 어떤 영향을 주었나요?',
-          ],
-        });
-      }
+  const kwObjects = extractKeywordsAdvanced(recs, quotesList);
+  const recTxt = records.map((r) => r.text).join(' ');
 
-      // 4. 미등록 서술어 범용 처리 (Neutral Fallback 안전망 로직)
-      const hasAnyFlagOrConcept =
-        concepts.length > 0 ||
-        f.experiment ||
-        f.inquiry ||
-        f.report ||
-        f.make ||
-        f.leader ||
-        f.conflict ||
-        f.care ||
-        f.coop ||
-        f.expand ||
-        quotes.length > 0;
+  const validKeywords = kwObjects
+    .filter((k) => k.score >= 1.35 && !CONCEPT_EXCLUDE.has(k.term))
+    .map((k) => k.term);
 
-      const isActionEnding = /(?:함|했음|하였음|됨|되었음|음|임|보임|나타남)\.?$/.test(sent.trim());
+  CONCEPTS.forEach(([term, al]) => {
+    if (!CONCEPT_EXCLUDE.has(term) && hasTerm(recTxt, term)) validKeywords.push(term);
+    if (al) {
+      al.split('|').forEach((a) => {
+        const at = a.trim();
+        if (!CONCEPT_EXCLUDE.has(at) && hasTerm(recTxt, at)) validKeywords.push(at);
+      });
+    }
+  });
 
-      if (!hasAnyFlagOrConcept && isActionEnding && sent.length >= 25 && predPenalty > -5) {
-        pool.push({
-          key: `${key}_fallback_action`,
-          competency: rec.type === '창의적 체험활동' ? 'career' : 'academic',
-          type: 'record',
-          grade: rec.grade,
-          subject: rec.subject,
-          highlightText: sent,
-          score: 2.6 + predPenalty,
-          question: `${L} 이 활동을 기획하고 수행하게 된 계기와, 구체적으로 어떤 과정을 거쳐 완성했는지 설명해 주세요.`,
-          intent: `${rec.subject} 활동의 자기주도적 기획 배경 및 구체적 실행 과정(진위성) 검증`,
-          points: [
-            '활동을 시작하게 된 구체적인 동기와 개인적 문제의식 제시',
-            '활동 수행 절차 및 본인이 기여한 핵심 역할 설명',
-            '활동을 통해 도출한 성과와 개인적 역량의 성장 포인트 강조',
-          ],
-          followUps: [
-            '그 활동을 진행하면서 가장 큰 보람을 느꼈던 순간이나 기억에 남는 장면은 무엇이었나요?',
-            '이 활동을 통해 배운 점이 이후 다른 학교생활이나 학업에 어떤 영향을 주었나요?',
-          ],
+  const majorKw = [
+    ...new Set([
+      ...(M ? [M.replace(/(학과|학부|전공|과)$/, '')] : []),
+      ...flds.flatMap((f) => (FIELD_KW[f.id] || '').split(' ')),
+      ...(customKeywords || []),
+      ...kwObjects.slice(0, 30).map((k) => k.term)
+    ].filter((k) => k && k.length >= 2))
+  ];
+
+  const ctx = {
+    major: M,
+    majorKw,
+    dynamicKeywords: kwObjects
+  };
+
+  const rawSents: SentenceItem[] = [];
+  recs.forEach((r, ri) => {
+    const parts = r.text.replace(/([가-힣)'’"”])\.\s*(?=[가-힣A-Za-z'‘"“([<0-9])/g, '$1.\n').split('\n');
+    parts.forEach((p, pi) => {
+      const pt = p.trim();
+      if (pt.length >= 12) {
+        rawSents.push({
+          sec: r.sec,
+          grade: r.grade,
+          subj: r.subj,
+          area: r.area,
+          text: pt,
+          qtext: pt,
+          rid: ri,
+          pi,
+          rel: 0,
+          score: 0,
+          f: {},
+          quotes: [],
+          concepts: []
         });
       }
     });
   });
 
-  // 점수 높은 순으로 정렬
-  return pool.filter((q) => q.score > 0).sort((a, b) => b.score - a.score);
+  const sents = rawSents.map((s) => analyze(s, ctx)).sort((a, b) => b.score - a.score);
+  const pool: CandidateQuestion[] = [];
+
+  // [1] Multi-hop Generator
+  const multiHopKwCandidates = kwObjects
+    .filter((k) => k.crossSectionDF >= 2 && k.score >= 1.35 && !CONCEPT_EXCLUDE.has(k.term))
+    .map((k) => k.term);
+
+  CONCEPTS.forEach(([term]) => {
+    if (!CONCEPT_EXCLUDE.has(term) && !multiHopKwCandidates.includes(term)) {
+      const matchCount = sents.filter((s) => s.text.includes(term)).length;
+      if (matchCount >= 2) multiHopKwCandidates.push(term);
+    }
+  });
+
+  multiHopKwCandidates.slice(0, 4).forEach((kw, mIdx) => {
+    const hits = sents.filter((s) => s.text.includes(kw));
+    if (hits.length >= 2) {
+      let s1 = hits[0];
+      let s2 = hits.find((h) => recordLabel(h) !== recordLabel(s1));
+      if (!s2 && hits[0].rid !== hits[1].rid) {
+        s2 = hits[1];
+      }
+      if (!s1 || !s2 || recordLabel(s1) === recordLabel(s2)) return;
+
+      if (s1.grade > s2.grade) {
+        const tmp = s1;
+        s1 = s2;
+        s2 = tmp;
+      }
+      const lab1 = recordLabel(s1), lab2 = recordLabel(s2);
+
+      pool.push(
+        Q({
+          b: 'C',
+          k: `mhop_${mIdx}`,
+          p: 4.8,
+          type: '종단연계',
+          tplId: 'multihop_growth',
+          src: '종단연계',
+          srcBadge: '[학년·과목 연계]',
+          catGroup: 'record',
+          text: `${lab1}에서 다룬 ‘${kw}’ 주제를 ${lab2}에서 한 단계 더 확장해 탐구했는데, 두 과목의 활동을 연결하게 된 문제의식과 학업적 성장을 설명해 주세요.`,
+          rtext: `${s1.text} / ${s2.text}`,
+          rlab: `${lab1} ➔ ${lab2}`,
+          sref: s2,
+          ans: `${josa(`‘${kw}’`, '을/를')} 중심으로 ${lab1}에서 기초 원리를 탐구한 뒤, ${lab2}에서 심화 응용 과제로 확장했습니다. 이 연계를 통해 단순 지식 습득에 머물지 않고 학문 간 융합적 사고력과 자기주도적 연구 역량을 키울 수 있었습니다.`,
+          ansLabel: '모범 답변 가이드',
+          tip: '학년이 올라가며 탐구의 깊이와 문제의식이 어떻게 발전했는지 구체적 계기를 들어 답변',
+          tails: ['두 활동 사이에 생긴 가장 결정적인 의문점은 무엇이었나요?']
+        })
+      );
+
+      pool.push(
+        Q({
+          b: 'A',
+          k: `mhop2_${mIdx}`,
+          p: 4.6,
+          type: '종단연계',
+          tplId: 'multihop_expand',
+          src: '종단연계',
+          srcBadge: '[학년·과목 연계]',
+          catGroup: 'record',
+          text: `${lab1}의 ‘${kw}’ 탐구에서 마주한 한계나 의문점을 ${lab2}에서 어떻게 발전시켜 해결했는지 구체적인 계기를 말씀해 주세요.`,
+          rtext: `${s1.text} / ${s2.text}`,
+          rlab: `${lab1} ➔ ${lab2}`,
+          sref: s2,
+          ans: `${lab1} 탐구 당시 [한계나 궁금했던 점]이 남아있었습니다. 이를 해결하기 위해 ${lab2}에서 [새로운 접근법이나 도구]를 도입하여 해결했으며, 이 과정에서 전공 분야에 대한 문제 해결력을 확립했습니다.`,
+          ansLabel: '모범 답변 가이드',
+          tip: '이전 탐구의 한계를 후속 탐구에서 극복한 디딤돌 과정을 설득력 있게 제시',
+          tails: ['대학에서 이 주제를 더 발전시킨다면 어떤 연구로 잇고 싶나요?']
+        })
+      );
+    }
+  });
+
+  // [2] Pure Student Record Candidates (from candidatesFrom)
+  sents.filter((s) => !s.skip).slice(0, 80).forEach((s) => {
+    candidatesFrom(s, ctx).forEach((q) => {
+      q.rtext = s.text;
+      q.rlab = recordLabel(s);
+      q.sref = s;
+      q.catGroup = 'record';
+      q.srcBadge = '[학생부 심층검증]';
+      pool.push(q);
+    });
+  });
+
+  // [3] Fusion Questions (from UNIV_Q tails)
+  const univTails = extractUnivQTails(U, pastData);
+  const fallbackTails = [
+    { cat: '인성', b: 'P' as const, tail: '이 활동을 추진하면서 공동체를 위해 어떤 점을 가장 중요하게 생각했고, 이를 위해 어떤 노력을 했는지 설명해 주세요.' },
+    { cat: '인성', b: 'P' as const, tail: '역할을 수행하는 과정에서 발생한 어려움을 극복하기 위해 구성원들과 어떻게 소통하고 협력했는지 설명해 주세요.' },
+    { cat: '전공', b: 'C' as const, tail: '이 탐구를 통해 지원 전공에서 필요로 하는 어떤 역량을 길렀다고 생각하는지 설명해 주세요.' },
+    { cat: '전공', b: 'C' as const, tail: '이 주제를 대학에 입학해 더 깊이 있게 발전시킨다면 어떤 연구나 전공 과목으로 연결하고 싶은가요?' },
+    { cat: '학업', b: 'A' as const, tail: '활동 과정에서 가장 어려웠던 점이나 예상과 달랐던 점은 무엇이었으며, 이를 어떻게 해결했는지 구체적으로 설명해 주세요.' },
+    { cat: '학업', b: 'A' as const, tail: '해당 탐구에서 활용한 핵심 개념과 작동 원리를 본인의 말로 명확하게 설명해 주세요.' }
+  ];
+
+  const allTails = [...univTails, ...fallbackTails];
+
+  allTails.forEach((tObj, tIdx) => {
+    let b: 'A' | 'C' | 'P' = tObj.b || 'A';
+    if (!tObj.b) {
+      if (/공동체|인성|갈등|협력|배려|리더|친구|모둠|기획|소통|동료|나눔|봉사/.test(tObj.cat) || /공동체|기획|갈등|역할|노력|구성원|소통|배려|협력/.test(tObj.tail)) b = 'P';
+      else if (/진로|전공|지원|계기|관심|직업|미래/.test(tObj.cat) || /진로|전공|진학|관심|학습|역량/.test(tObj.tail)) b = 'C';
+    }
+
+    const candidates = sents.filter((s) => {
+      if (b === 'P') return s.f && (s.f.leader || s.f.coop || s.f.care || s.f.plan);
+      if (b === 'C') return s.rel || s.area === '진로활동' || (s.f && s.f.read);
+      return s.f && (s.f.experiment || s.f.inquiry || s.f.make || s.concepts.length > 0);
+    });
+    const matchSent = candidates[tIdx % (candidates.length || 1)] || sents[tIdx % sents.length];
+
+    if (matchSent) {
+      const topicQ = matchSent.quotes.find((q) => !q.book);
+      const bookQ = matchSent.quotes.find((q) => q.book);
+      const ancQ = (topicQ && topicQ.q) || (bookQ && bookQ.q) || (matchSent.concepts[0] && matchSent.concepts[0].term) || null;
+      const L = lead(matchSent, ancQ, tIdx % 4);
+      const fusedText = `${L} ${tObj.tail}`;
+
+      pool.push(
+        Q({
+          b,
+          k: `ufus_${tIdx}_${matchSent.rid}`,
+          p: 3.5 + matchSent.score * 0.2,
+          type: '화법융합',
+          tplId: `fusion_univ_${b.toLowerCase()}_${tIdx % 10}`,
+          src: '융합',
+          srcBadge: `[${univShort} 예시화법 융합]`,
+          catGroup: 'fusion',
+          text: fusedText,
+          rtext: matchSent.text,
+          rlab: recordLabel(matchSent),
+          sref: matchSent,
+          ans: matchSent.concepts[0] ? matchSent.concepts[0].def : null,
+          ansLabel: matchSent.concepts[0] ? '관련 개념 정의' : '모범 답변 가이드',
+          tip: '대학 입학사정관의 공식 질문 화법과 학생부 탐구를 연결한 융합 문항입니다.',
+          tails: ['이 활동에서 본인이 주도적으로 해결한 부분을 설명해 주세요.']
+        })
+      );
+    }
+  });
+
+  // [4] Past Questions from CASES
+  const matchedCases = matchCases(U, M, fld, pastData);
+  matchedCases.slice(0, 25).forEach((cItem, cIdx) => {
+    const c = cItem.r;
+    const isPass = (c[4] || '').includes('합');
+    const pairs = splitCaseQs(c[5] || '', c[6] || '', recTxt, validKeywords, M);
+    pairs.slice(0, 4).forEach((pItem, qIdx) => {
+      const qText = pItem.qText;
+      const rawAns = pItem.ans;
+      const ansValid = rawAns && isValidAnswerMatch(qText, rawAns);
+      pool.push(
+        Q({
+          b: classifyText(qText) as any,
+          k: `case_${cIdx}_${qIdx}`,
+          p: 2.8 + (isPass ? 0.6 : 0) + (c[0] === U ? 0.5 : 0),
+          type: '기출복기',
+          tplId: `case_past_${cIdx}_${qIdx}`,
+          src: '합격선배 복기',
+          srcBadge: `[${(c[0] || univShort).replace(/대학교$/, '대')} 합격선배 복기]`,
+          catGroup: 'past',
+          text: qText,
+          ans: ansValid ? rawAns : null,
+          ansLabel: ansValid ? (isPass ? '실제 합격선배 답변 참고' : '선배 면접 답변 참고') : '모범 답변 가이드',
+          tip: c[7] ? `[선배 면접 후기] ${c[7].slice(0, 100)}...` : '실제 면접 복기 문항 — 본인의 학생부 활동으로 바꿔 답변 준비',
+          tails: ['그 활동을 통해 최종적으로 느낀 점은 무엇인가요?']
+        })
+      );
+    });
+  });
+
+  // [5] Past Questions from QB
+  const qm = qbMatch(U, M, flds, majorKw, recTxt, pastData, { pool: true, min: 3 });
+  const seenQ = new Set<string>();
+  let nMajor = 0;
+  let nComm = 0;
+
+  for (const x of qm) {
+    const r = x.r;
+    if (r[8]) continue;
+    if (!isCleanQuestion(r[0], recTxt, validKeywords, M)) continue;
+    if (!isMajorCompatible(r[2], M, flds)) continue;
+
+    const nk = r[0].replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 22);
+    if (seenQ.has(nk)) continue;
+
+    const isComm = r[4] === 2 || classifyText(r[0]) === 'P';
+    if (isComm) {
+      if (nComm >= 30) continue;
+      nComm++;
+    } else {
+      if (nMajor >= 45) continue;
+      nMajor++;
+    }
+    seenQ.add(nk);
+
+    const mmi = r[4] === 2;
+    const uStr = ((pastData?.QB?.U && pastData.QB.U[r[1]]) || univShort).replace(/대학교$/, '대');
+    const yearStr = r[6] ? `${r[6]} ` : '';
+
+    const hasKwHit = validKeywords.some((kw) => hasTerm(r[0], kw));
+    const catGroup = hasKwHit ? 'fusion' : 'past';
+    const srcBadge = hasKwHit ? `[${uStr} 기출융합]` : `[${yearStr}${uStr} 실제기출]`;
+    const priority = 2.4 + (hasKwHit ? 3.5 : 0) + (r[1] === (pastData?.QB?.U ? pastData.QB.U.indexOf(U) : -1) ? 3.0 : 0) + (r[6] >= 2025 ? 0.8 : 0);
+
+    const rawAns = r[7] || null;
+    const ansValid = isValidAnswerMatch(r[0], rawAns);
+
+    pool.push(
+      Q({
+        b: mmi ? 'P' : (classifyText(r[0]) as any),
+        k: `qb_${x.i}`,
+        p: priority,
+        type: mmi ? '인적성·MMI' : '대학기출',
+        tplId: `qb_item_${x.i}`,
+        src: '실제기출',
+        srcBadge,
+        catGroup,
+        text: r[0],
+        ans: ansValid ? rawAns : null,
+        ansLabel: ansValid ? '실제 합격생 답변 사례' : '모범 답변 가이드',
+        tip: hasKwHit ? '내 학생부 탐구 주제와 직접 연결되는 실제 대학 기출입니다.' : '실제 대학 기출 문항입니다.',
+        tails: mmi ? ['반대 입장의 사람을 어떻게 설득하겠습니까?'] : ['이 경험이 대학 학업에 어떤 영향을 줄 것이라 보나요?']
+      })
+    );
+  }
+
+  // 중복 제거 및 점수 순 정렬
+  pool.sort((a, b) => b.p - a.p);
+  return pool;
 }
 
-/**
- * 오프라인 표준 규칙 엔진 기반 초기 60문항 생성 (학업 20, 진로 20, 공동체 20)
- */
+// ============================================================
+// 9. 오프라인 표준 룰베이스 질문 60개 생성 (generateStandardRuleQuestions)
+// ============================================================
 export function generateStandardRuleQuestions(
   profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'> & { customKeywords?: string[] },
-  records: StudentRecordItem[]
+  records: StudentRecordItem[],
+  pastData?: PastExamData | null
 ): QuestionItem[] {
-  const pool = buildRuleCandidatePool(
-    records,
-    profile.targetMajor || '지원 학과',
-    profile.targetUniversity || '지원 대학',
-    profile.customKeywords
-  );
+  const U = profile.targetUniversity || '지원 대학';
+  const M = profile.targetMajor || '지원 학과';
+  const pool = buildRuleCandidatePool(records, M, U, profile.customKeywords, pastData);
 
-  const usedKeys = new Set<string>();
-  const academicList: QuestionItem[] = [];
-  const careerList: QuestionItem[] = [];
-  const communityList: QuestionItem[] = [];
+  const sections = [
+    { name: '학업역량', code: 'A', want: 20 },
+    { name: '진로역량', code: 'C', want: 20 },
+    { name: '공동체역량', code: 'P', want: 20 }
+  ];
 
-  // 학업역량 20문항 추출
-  for (const q of pool) {
-    if (academicList.length >= 20) break;
-    if (q.competency === 'academic' && !usedKeys.has(q.key)) {
-      usedKeys.add(q.key);
-      academicList.push(sanitizeQuestionItem(q, academicList.length + 1));
+  const globalTplCnt = new Map<string, number>();
+  const globalRecCnt = new Map<string, number>();
+  let lastTakenRecKey = '';
+  const used = new Set<CandidateQuestion>();
+  const usedText = new Set<string>();
+
+  const rng = mulberry(12345);
+
+  const byBucket = (code: string) => {
+    return pool
+      .filter((q) => q.b === code || (code === 'P' && (q.b === 'P' || q.b === 'M' || q.b === 'T' || q.b === 'D')) || (code === 'C' && (q.b === 'C' || q.b === 'D')))
+      .map((q) => {
+        const tplUsed = globalTplCnt.get(q.tplId || q.type || '') || 0;
+        const recKey = q.rtext || (q.sref && q.sref.text) || q.k || '';
+        const recUsed = globalRecCnt.get(recKey) || 0;
+        return {
+          q,
+          sc: q.p - tplUsed * 1.8 - recUsed * 2.5 + (q.b === code ? 0.35 : 0) + (rng() - 0.5) * 0.4
+        };
+      })
+      .sort((x, y) => y.sc - x.sc)
+      .map((x) => x.q);
+  };
+
+  const finalQuestions: QuestionItem[] = [];
+
+  sections.forEach((sec, sIdx) => {
+    const list: CandidateQuestion[] = [];
+    const secTplCnt = new Map<string, number>();
+    const secTypeCnt = new Map<string, number>();
+    const n = sec.want;
+
+    const take = (q?: CandidateQuestion, allowRelaxed: boolean = false): boolean => {
+      if (!q || used.has(q) || usedText.has(q.text.trim())) return false;
+
+      const recKey = q.rtext || (q.sref && q.sref.text) || q.k || '';
+      const rCnt = globalRecCnt.get(recKey) || 0;
+      const maxRec = allowRelaxed ? 4 : 1;
+      if (q.catGroup === 'record' && recKey && rCnt >= maxRec) return false;
+
+      // 직전 문항과 동일한 생기부 문장 연속 인용 방지
+      if (recKey && lastTakenRecKey === recKey) return false;
+
+      const tpl = q.tplId || q.type || '';
+      if (tpl) {
+        const gCount = globalTplCnt.get(tpl) || 0;
+        const maxG = allowRelaxed ? 5 : 2;
+        if (gCount >= maxG) return false;
+        const sCount = secTplCnt.get(tpl) || 0;
+        const maxS = allowRelaxed ? 3 : 1;
+        if (sCount >= maxS) return false;
+      }
+
+      // concept 그룹 한 평가영역 내 최대 2개 제한
+      const isConcept = q.typeGroup === 'concept' || /^concept_/.test(tpl) || q.type === '개념원리' || q.type === '개념적용' || q.type === '개념한계' || q.type === '개념비교';
+      if (isConcept) {
+        const conceptCount = list.filter((x) => x.typeGroup === 'concept' || /^concept_/.test(x.tplId || '') || x.type === '개념원리' || x.type === '개념적용' || x.type === '개념한계' || x.type === '개념비교').length;
+        if (!allowRelaxed && conceptCount >= 2) return false;
+      }
+
+      const qType = q.type || '';
+      if (!allowRelaxed && qType) {
+        const typeCount = secTypeCnt.get(qType) || 0;
+        if (typeCount >= 2) return false;
+      }
+
+      used.add(q);
+      usedText.add(q.text.trim());
+      if (recKey) {
+        globalRecCnt.set(recKey, rCnt + 1);
+        lastTakenRecKey = recKey;
+      }
+      if (tpl) {
+        globalTplCnt.set(tpl, (globalTplCnt.get(tpl) || 0) + 1);
+        secTplCnt.set(tpl, (secTplCnt.get(tpl) || 0) + 1);
+      }
+      if (qType) {
+        secTypeCnt.set(qType, (secTypeCnt.get(qType) || 0) + 1);
+      }
+      list.push(q);
+      return true;
+    };
+
+    const cand = byBucket(sec.code);
+
+    // 1. Multi-hop questions in Academic or Career section
+    const mhopCand = cand.filter((q) => q.type === '종단연계');
+    for (const q of mhopCand) {
+      if (list.filter((x) => x.type === '종단연계').length >= 2 || list.length >= n) break;
+      take(q);
     }
-  }
 
-  // 진로역량 20문항 추출
-  for (const q of pool) {
-    if (careerList.length >= 20) break;
-    if (q.competency === 'career' && !usedKeys.has(q.key)) {
-      usedKeys.add(q.key);
-      careerList.push(sanitizeQuestionItem(q, careerList.length + 21));
+    const recCand = cand.filter((q) => q.catGroup === 'record' && q.type !== '종단연계');
+    const fusCand = cand.filter((q) => q.catGroup === 'fusion');
+    const pastCand = cand.filter((q) => q.catGroup === 'past');
+
+    const wantRec = Math.max(1, Math.round(n * 0.52));
+    const wantFus = Math.max(1, Math.round(n * 0.25));
+    const wantPast = Math.max(1, n - wantRec - wantFus);
+
+    // Pass 1: Record candidates up to wantRec
+    for (const q of recCand) {
+      if (list.filter((x) => x.catGroup === 'record').length >= wantRec || list.length >= n) break;
+      take(q);
     }
-  }
 
-  // 공동체역량 20문항 추출
-  for (const q of pool) {
-    if (communityList.length >= 20) break;
-    if (q.competency === 'community' && !usedKeys.has(q.key)) {
-      usedKeys.add(q.key);
-      communityList.push(sanitizeQuestionItem(q, communityList.length + 41));
+    // Pass 2: Fusion candidates up to wantFus
+    for (const q of fusCand) {
+      if (list.filter((x) => x.catGroup === 'fusion').length >= wantFus || list.length >= n) break;
+      take(q);
     }
-  }
 
-  // 만약 특정 역량의 기록이 적어 20개에 미달할 경우 잔여 후보 풀에서 순서대로 보충
-  const combined = [...academicList, ...careerList, ...communityList];
-  if (combined.length < 60) {
-    for (const q of pool) {
-      if (combined.length >= 60) break;
-      if (!usedKeys.has(q.key)) {
-        usedKeys.add(q.key);
-        combined.push(sanitizeQuestionItem(q, combined.length + 1));
+    // Pass 3: Past candidates up to wantPast
+    for (const q of pastCand) {
+      if (list.filter((x) => x.catGroup === 'past').length >= wantPast || list.length >= n) break;
+      take(q);
+    }
+
+    // Fallback 1: Fill remaining with relaxed constraints
+    if (list.length < n) {
+      for (const q of fusCand) {
+        if (list.length >= n) break;
+        take(q, true);
+      }
+      for (const q of pastCand) {
+        if (list.length >= n) break;
+        take(q, true);
+      }
+      for (const q of recCand) {
+        if (list.length >= n) break;
+        take(q, true);
       }
     }
-  }
 
-  // 1번에 대학/학과 지원동기 질문 배치
-  combined.unshift(
-    sanitizeQuestionItem(
-      {
-        id: 'q-rule-univ-1',
-        competency: 'university',
-        type: 'university',
-        grade: '공통',
-        subject: '지원동기 및 인재상',
-        question: `수많은 대학 중 특별히 ${profile.targetUniversity || '지원 대학'} ${profile.targetMajor || '지원 학과'}에 지원하게 된 결정적인 계기와, 고교 시절 활동 중 어떤 경험이 본인을 우리 학과에 적합한 인재로 성장시켰다고 생각하나요?`,
-        intent: '대학 및 학과에 대한 진정성 있는 지원 동기와 인재상 부합도 검증',
-        points: [
-          `${profile.targetUniversity || '지원 대학'} ${profile.targetMajor || '지원 학과'}만의 특화된 교육과정 언급`,
-          '고교 학생부 속 가장 결정적인 탐구 경험과 전공의 연결점 제시',
-          '입학 후 구체적인 학업 및 진로 로드맵 피력',
-        ],
-        followUps: [
-          `만약 대학 입학 후 본인이 기대했던 ${profile.targetMajor || '전공'} 수업의 현실이 생각과 다르다면 어떻게 극복하시겠습니까?`,
-        ],
-      },
-      1
-    )
-  );
+    // Fallback 2: Wider candidate pool
+    if (list.length < n) {
+      for (const q of cand) {
+        if (list.length >= n) break;
+        take(q, true);
+      }
+    }
 
-  // 마지막에 압박/약점 방어 질문 배치
-  combined.push(
-    sanitizeQuestionItem(
-      {
-        id: 'q-rule-press-1',
-        competency: 'academic',
-        type: 'pressure',
-        grade: '공통',
-        subject: '학업/활동 약점 방어',
-        question: `학생부를 전반적으로 검토했을 때, 성적이 일시적으로 하락했거나 특정 과목에서 탐구의 깊이가 다소 아쉬운 부분이 관찰됩니다. 본인은 이 결과를 어떻게 받아들이고 있으며, 이를 극복하기 위해 어떤 노력을 기울였습니까?`,
-        intent: '위기 극복 역량 및 실패에 대한 객관적 성찰과 성실성 검증',
-        points: [
-          '결과에 대한 변명 대신 솔직하고 담백한 원인 인정',
-          '문제를 발견한 후 바꾼 자신만의 공부법이나 태도의 변화 설명',
-          '극복 과정에서 얻은 회복탄력성과 배움의 가치 강조',
-        ],
-        followUps: ['그 극복 경험이 이후 다른 학기나 활동에서 어떤 긍정적 변화를 만들었나요?'],
-        defense: '결과를 탓하기보다 극복하는 과정에서 배우고 성장한 점을 중심으로 답변하세요.',
-      },
-      combined.length + 1
-    )
-  );
+    // Fallback 3: Entire pool
+    if (list.length < n) {
+      for (const q of pool) {
+        if (list.length >= n) break;
+        take(q, true);
+      }
+    }
 
-  return combined.slice(0, 60).map((q, idx) => ({
-    ...q,
-    id: `q-rule-${idx + 1}`,
-    completed: false,
-  }));
+    // Fallback 4: Standard personality/community questions if pool is exhausted for P
+    if (list.length < n && sec.code === 'P') {
+      const standardCommunityQs = [
+        '고등학교 생활 중 공동의 목표를 달성하기 위해 친구들과 협력하며 가장 크게 배운 점은 무엇인가요?',
+        '모둠이나 동아리 활동 중 의견 차이나 갈등이 생겼을 때, 이를 원만하게 조율했던 구체적인 경험을 말씀해 주세요.',
+        '자신의 이익보다 학급이나 동료를 위해 솔선수범하거나 배려했던 대표적인 사례를 설명해 주세요.',
+        '고교 시절 지키기 어려운 규칙이나 원칙을 끝까지 준수했던 경험이 있다면 구체적으로 말씀해 주세요.',
+        '타인과 소통할 때 본인이 가장 중요하게 생각하는 가치나 태도는 무엇이며, 이를 실천한 경험이 있나요?',
+        '새로운 환경이나 낯선 팀원들과 함께 프로젝트를 시작할 때 구성원 간의 유대감을 형성하는 본인만의 방법은 무엇인가요?',
+        '주변의 도움을 받아 어려움을 극복했던 경험이 있다면, 그 과정에서 느낀 고마움과 이를 다시 나눔으로 연결한 사례가 있나요?',
+        '자신이 리더가 아니었음에도 팀의 목표 달성을 위해 묵묵히 기여했던 경험이 있다면 말씀해 주세요.',
+        '친구들의 반대나 무관심 속에서도 공동체를 위해 꼭 필요하다고 생각하여 추진했던 일이 있나요?',
+        '활동을 진행하면서 팀원 간에 감정적인 어려움이 발생했을 때 분위기를 전환하기 위해 어떤 노력을 했나요?',
+        '다양한 배경이나 성향을 가진 동료들과 협업할 때 생기는 장단점과 이를 대하는 태도는 무엇인가요?',
+        '학교 생활 중 가장 기억에 남는 봉사활동이나 나눔의 경험과 그를 통해 얻은 가치관의 변화는 무엇인가요?',
+        '동료의 장점을 발견하고 이를 칭찬하거나 격려하여 팀의 시너지를 이끌어낸 경험이 있나요?',
+        '갈등 상황에서 자신의 의견을 고집하기보다 상대방의 입장을 먼저 수용하고 양보했던 사례가 있나요?',
+        '공동체 내에서 소외되거나 적응에 어려움을 겪는 동료를 돕기 위해 실천한 노력이 있다면 설명해 주세요.'
+      ];
+      for (let ci = 0; ci < standardCommunityQs.length && list.length < n; ci++) {
+        const text = standardCommunityQs[ci];
+        if (usedText.has(text.trim())) continue;
+        take(
+          Q({
+            b: 'P',
+            k: `comm_std_${ci}`,
+            p: 1.5,
+            type: '공동체인성',
+            tplId: `comm_std_${ci}`,
+            src: '공동체역량',
+            srcBadge: '[공동체·인성]',
+            catGroup: 'common',
+            text,
+            ans: '자신의 경험을 바탕으로 경청, 배려, 책임감, 소통의 구체적 사례를 들어 두괄식으로 답변하세요.',
+            ansLabel: '모범 답변 가이드',
+            tip: '대학 인재상에서 중시하는 협업 능력, 배려심, 도덕성, 갈등 조율 역량을 평가하는 문항입니다.',
+            tails: ['그 경험을 통해 형성된 가치관이 대학 입학 후 단체 생활에 어떻게 발휘될 것이라 보나요?']
+          }),
+          true
+        );
+      }
+    }
+
+    // QuestionItem으로 매핑
+    const compType: CompetencyType = sec.code === 'A' ? 'academic' : sec.code === 'C' ? 'career' : 'community';
+    list.forEach((q, qIdx) => {
+      finalQuestions.push({
+        id: `q-rule-${sec.code.toLowerCase()}-${qIdx + 1}-${Date.now()}-${sIdx}`,
+        competency: compType,
+        type: q.tplId === 'pres' || q.type === '오차분석' || q.type === '개념한계' ? 'pressure' : (q.type === '종단연계' || q.catGroup === 'fusion' ? 'deep' : 'record'),
+        grade: q.sref?.grade ? `${q.sref.grade}학년` : undefined,
+        subject: q.sref?.subj || q.sref?.area,
+        highlightText: q.rtext,
+        question: q.text,
+        intent: q.tip || `${sec.name} 검증 및 탐구 깊이 평가`,
+        points: q.ans ? [q.ans] : (q.points && q.points.length ? q.points : ['핵심 개념과 자신의 탐구 역할을 두괄식으로 설명하세요.']),
+        followUps: q.tails && q.tails.length ? q.tails : ['이 활동을 진행하면서 가장 크게 성장했다고 느낀 점은 무엇인가요?'],
+        defense: q.tplId === 'pres' || q.type === '오차분석' || q.type === '개념한계' ? '결과의 한계나 예상 밖 상황을 솔직히 인정하고, 이를 보완하기 위해 시도한 논리적 해결책을 답변하세요.' : undefined,
+        srcBadge: q.srcBadge,
+        catGroup: q.catGroup,
+        tplId: q.tplId,
+        ansLabel: q.ansLabel || undefined,
+        tip: q.tip || undefined,
+        completed: false,
+        starred: qIdx === 0 || q.type === '종단연계' // 각 영역 첫 문항 및 종단연계 문항 기본 핵심 체크
+      });
+    });
+  });
+
+  return finalQuestions;
 }
 
-/**
- * [+ 비중복 맞춤 질문 추가하기 (역량별 선택 지원)]
- * 이미 생성된 질문에 사용된 문장(key 또는 질문문구)을 제외하고,
- * 오프라인 표준 규칙 후보 풀에서 상위 점수의 새로운 질문을 즉시 추가 추출
- */
+// ============================================================
+// 10. 추가 문항 생성 및 특정 과목 3문항 생성 (UI 호환 함수)
+// ============================================================
 export function generateAdditionalRuleQuestions(
   profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'> & { customKeywords?: string[] },
   records: StudentRecordItem[],
@@ -795,27 +1987,38 @@ export function generateAdditionalRuleQuestions(
 
   for (const cand of pool) {
     if (additions.length >= count) break;
-    if (targetCompetency && targetCompetency !== 'all' && cand.competency !== targetCompetency) {
+    const candComp: CompetencyType = cand.b === 'A' ? 'academic' : cand.b === 'C' ? 'career' : 'community';
+    if (targetCompetency && targetCompetency !== 'all' && candComp !== targetCompetency) {
       continue;
     }
-    if (!existingTexts.has(cand.question.trim())) {
-      existingTexts.add(cand.question.trim());
-      additions.push(
-        sanitizeQuestionItem(cand, existingQuestions.length + additions.length + 1)
-      );
-    }
+    if (existingTexts.has(cand.text.trim())) continue;
+
+    existingTexts.add(cand.text.trim());
+    additions.push({
+      id: `q-add-${cand.b.toLowerCase()}-${additions.length + 1}-${Date.now()}`,
+      competency: candComp,
+      type: cand.tplId === 'pres' ? 'pressure' : (cand.type === '종단연계' || cand.catGroup === 'fusion' ? 'deep' : 'record'),
+      grade: cand.sref?.grade ? `${cand.sref.grade}학년` : undefined,
+      subject: cand.sref?.subj || cand.sref?.area,
+      highlightText: cand.rtext,
+      question: cand.text,
+      intent: cand.tip || `${candComp} 추가 검증 문항`,
+      points: cand.ans ? [cand.ans] : (cand.points || ['핵심 키워드를 중심으로 답변하세요.']),
+      followUps: cand.tails || [],
+      defense: cand.tplId === 'pres' ? '자신의 역할과 문제 해결 과정을 수치와 함께 답변하세요.' : undefined,
+      srcBadge: cand.srcBadge,
+      catGroup: cand.catGroup,
+      tplId: cand.tplId,
+      ansLabel: cand.ansLabel || undefined,
+      tip: cand.tip || undefined,
+      completed: false,
+      starred: false
+    });
   }
 
-  return additions.map((q, idx) => ({
-    ...q,
-    id: `q-rule-more-${existingQuestions.length + idx + 1}-${Date.now()}`,
-    completed: false,
-  }));
+  return additions;
 }
 
-/**
- * 특정 과목/영역(subject) 맞춤 3문항 즉시 생성 (진위 확인 1개 + 심화 연계 1개 + 위기/약점 방어 1개)
- */
 export function generateSubject3Questions(
   profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'> & { customKeywords?: string[] },
   records: StudentRecordItem[],
@@ -827,7 +2030,6 @@ export function generateSubject3Questions(
   const gradeName = primaryRecord.grade || '공통';
   const majorName = profile.targetMajor?.trim() || '지원 학과';
 
-  // 1. 해당 과목 레코드들을 대상으로 후보 풀 생성
   const pool = buildRuleCandidatePool(
     records,
     majorName,
@@ -838,122 +2040,44 @@ export function generateSubject3Questions(
   const existingTexts = new Set(existingQuestions.map((q) => q.question.trim()));
   const picked: QuestionItem[] = [];
 
-  // 풀에서 record, deep, pressure 우선 매칭
-  const recordCandidates = pool.filter((q) => q.type === 'record' && !existingTexts.has(q.question.trim()));
-  const deepCandidates = pool.filter((q) => q.type === 'deep' && !existingTexts.has(q.question.trim()));
-  const pressureCandidates = pool.filter((q) => q.type === 'pressure' && !existingTexts.has(q.question.trim()));
+  const recordCand = pool.find((q) => q.catGroup === 'record' && q.type !== '종단연계' && !existingTexts.has(q.text.trim()));
+  const deepCand = pool.find((q) => (q.type === '종단연계' || q.catGroup === 'fusion' || q.type === '개념적용') && !existingTexts.has(q.text.trim()) && q !== recordCand);
+  const pressureCand = pool.find((q) => (q.type === '개념한계' || q.type === '오차분석' || q.tplId === 'pres') && !existingTexts.has(q.text.trim()) && q !== recordCand && q !== deepCand);
 
-  // 1) 기록 진위 확인 문항
-  if (recordCandidates.length > 0) {
-    picked.push(
-      sanitizeQuestionItem(
-        recordCandidates[0],
-        existingQuestions.length + picked.length + 1
-      )
-    );
-    existingTexts.add(recordCandidates[0].question.trim());
-  } else {
-    let snippet = primaryRecord.text.split(/[.!?]\s+/)[0] || '';
-    if (snippet.length > 55) snippet = snippet.slice(0, 52) + '…';
-    picked.push({
-      id: `q-subj-rec-${Date.now()}-1`,
-      competency: primaryRecord.type === '창의적 체험활동' ? 'community' : 'academic',
-      type: 'record',
-      grade: gradeName,
-      subject: subjectName,
-      highlightText: snippet,
-      question: `(${gradeName} ${subjectName}) 학생부 기록 중 "${snippet}" 관련 활동을 주도적으로 시작하게 된 계기와, 본인이 담당했던 가장 핵심적인 역할은 무엇이었나요?`,
-      intent: `${subjectName} 활동에 대한 주도적 참여 동기 및 본인의 실질적 기여도(진위성) 검증`,
-      points: [
-        '활동을 기획하거나 시작하게 된 구체적인 지적 계기 제시',
-        '역할 분담 시 자신이 자발적으로 맡았던 핵심 업무와 기여도 설명',
-        '활동을 통해 도출한 결과물과 개인적 성장 포인트 강조',
-      ],
-      followUps: [
-        '그 활동을 진행하는 동안 가장 많은 시간과 노력을 투입했던 구체적인 과정은 무엇이었나요?',
-      ],
-      completed: false,
-      starred: true,
-    });
-  }
+  const fallbackCand = pool.filter((q) => !existingTexts.has(q.text.trim()));
 
-  // 2) 심화 연계 문항
-  if (deepCandidates.length > 0) {
-    picked.push(
-      sanitizeQuestionItem(
-        deepCandidates[0],
-        existingQuestions.length + picked.length + 1
-      )
-    );
-    existingTexts.add(deepCandidates[0].question.trim());
-  } else {
-    let secondSnippet = primaryRecord.text.split(/[.!?]\s+/)[1] || primaryRecord.text.slice(0, 50);
-    if (secondSnippet.length > 55) secondSnippet = secondSnippet.slice(0, 52) + '…';
-    picked.push({
-      id: `q-subj-deep-${Date.now()}-2`,
-      competency: 'career',
-      type: 'deep',
-      grade: gradeName,
-      subject: subjectName,
-      highlightText: secondSnippet,
-      question: `(${gradeName} ${subjectName}) 수업 및 탐구 활동에서 다룬 개념이나 지적 호기심을 지원 전공인 ${majorName} 분야와 어떻게 연계하여 심화 탐구하였습니까?`,
-      intent: '교과 지식의 확장성 및 지원 전공과의 융합적 탐구 역량 검증',
-      points: [
-        '해당 교과에서 다룬 핵심 원리나 개념의 정확한 이해 제시',
-        `${majorName}의 전공 학문이나 최근 이슈와의 학문적 접점 설명`,
-        '대학 입학 후 이어가고 싶은 후속 연구나 학습 계획으로 확장',
-      ],
-      followUps: [
-        `그 탐구 내용을 ${majorName}의 관점에서 발전시킨다면 어떤 새로운 시각이나 시사점을 얻을 수 있을까요?`,
-      ],
-      completed: false,
-      starred: true,
-    });
-  }
+  const targets = [
+    { cand: recordCand || fallbackCand[0], label: '기록 진위 확인', type: 'record' as const },
+    { cand: deepCand || fallbackCand[1], label: '심화 연계', type: 'deep' as const },
+    { cand: pressureCand || fallbackCand[2], label: '약점 방어·압박', type: 'pressure' as const }
+  ];
 
-  // 3) 위기/약점 방어 문항
-  if (pressureCandidates.length > 0) {
-    picked.push(
-      sanitizeQuestionItem(
-        pressureCandidates[0],
-        existingQuestions.length + picked.length + 1
-      )
-    );
-    existingTexts.add(pressureCandidates[0].question.trim());
-  } else {
-    picked.push({
-      id: `q-subj-press-${Date.now()}-3`,
-      competency: 'academic',
-      type: 'pressure',
-      grade: gradeName,
-      subject: subjectName,
-      question: `(${gradeName} ${subjectName}) 활동을 진행하면서 예상치 못했던 난관이나 한계점은 무엇이었으며, 이를 극복하기 위해 어떤 노력을 기울였습니까?`,
-      intent: '위기 극복 능력, 문제 해결의 유연성, 비판적 자기 성찰 태도 평가',
-      points: [
-        '실패나 난관을 솔직하게 인정하고 원인을 객관적으로 분석',
-        '원인 해결을 위해 시도했던 자신만의 대안이나 소통/학습 노력 제시',
-        '극복 과정을 통해 배운 교훈과 태도의 긍정적 변화 강조',
-      ],
-      followUps: [
-        '다시 그 활동을 수행할 기회가 주어진다면 어떤 점을 보완하여 더 나은 결과를 만들고 싶나요?',
-      ],
-      defense: '결과에 대한 변명 대신, 과정에서 배운 회복탄력성과 성장을 중심으로 당당하게 답변하세요.',
-      completed: false,
-      starred: true,
-    });
-  }
-
-  return picked.map((q, idx) =>
-    sanitizeQuestionItem(
-      {
-        ...q,
-        id: `q-subj-custom-${existingQuestions.length + idx + 1}-${Date.now()}`,
-        subject: subjectName,
+  targets.forEach((t, idx) => {
+    const c = t.cand;
+    if (c) {
+      existingTexts.add(c.text.trim());
+      picked.push({
+        id: `q-subj-${idx + 1}-${Date.now()}`,
+        competency: c.b === 'A' ? 'academic' : c.b === 'C' ? 'career' : 'community',
+        type: t.type,
         grade: gradeName,
+        subject: subjectName,
+        highlightText: c.rtext,
+        question: c.text,
+        intent: c.tip || `${subjectName} 과목 ${t.label} 평가`,
+        points: c.ans ? [c.ans] : (c.points || ['핵심 키워드를 중심으로 답변하세요.']),
+        followUps: c.tails || [],
+        defense: t.type === 'pressure' ? '활동 과정의 제약 조건과 이를 극복하기 위한 노력을 솔직하고 논리적으로 답변하세요.' : undefined,
+        srcBadge: c.srcBadge || `[${subjectName} 맞춤]`,
+        catGroup: c.catGroup,
+        tplId: c.tplId,
+        ansLabel: c.ansLabel || undefined,
+        tip: c.tip || undefined,
         completed: false,
-        starred: true,
-      },
-      existingQuestions.length + idx + 1
-    )
-  );
+        starred: true
+      });
+    }
+  });
+
+  return picked;
 }

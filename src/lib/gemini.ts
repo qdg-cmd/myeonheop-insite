@@ -1,6 +1,7 @@
 import { ApiKeys, QuestionItem, StudentProfile, StudentRecordItem } from '../types';
 import { generateStandardRuleQuestions } from './ruleEngine';
 import { maskPersonalInfo } from './masking';
+import { loadPastExamData } from './pastExamLoader';
 
 /**
  * AI 질문 생성 함수 (10개씩 묶어서 배치 호출)
@@ -25,8 +26,9 @@ export async function generateInterviewQuestions(
 
   // 3. API 키가 없거나 테스트 모드인 경우: 오프라인 표준 룰베이스 엔진 가동 (60문항: 학업 20, 진로 20, 공동체 20)
   onProgress?.('오프라인 표준 규칙 엔진으로 맞춤 질문 60개 생성 중 (API 키 불필요)…');
+  const pastExamData = await loadPastExamData();
   await new Promise((r) => setTimeout(r, 600));
-  return generateStandardRuleQuestions(profile, records);
+  return generateStandardRuleQuestions(profile, records, pastExamData);
 }
 
 /**
@@ -296,150 +298,9 @@ async function callOpenAiApi(
   }));
 }
 
-/**
- * 형광펜이 없는 일반 텍스트에서 면접 질문으로 출제하기 좋은 핵심 활동 문장을 자동 추출
- */
-function extractKeySentencesFromRawText(rawText: string): string[] {
-  const sentences = rawText
-    .split(/(?<=[.?!])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 25 && s.length <= 150);
 
-  const keywords = [
-    '탐구', '보고서', '실험', '발표', '분석', '설계', '주장', '제언',
-    '토론', '조사', '프로젝트', '극복', '해결', '가설', '원인', '비판', '도출',
-  ];
 
-  const scored = sentences.map((sentence) => {
-    let score = 0;
-    for (const kw of keywords) {
-      if (sentence.includes(kw)) score += 2;
-    }
-    if (/(?:함|음|였음|돋보임|보여줌|이끔)\.?$/.test(sentence)) score += 1;
-    return { sentence, score };
-  });
 
-  scored.sort((a, b) => b.score - a.score);
-  const top = scored.filter((s) => s.score > 0).slice(0, 2).map((s) => s.sentence);
-
-  return top.length > 0 ? top : [sentences[0] || rawText.slice(0, 80)];
-}
-
-/**
- * 로컬 룰베이스 질문 생성기 (API 키 미설정 시)
- */
-function generateRuleBasedQuestions(
-  profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'>,
-  records: StudentRecordItem[]
-): QuestionItem[] {
-  const questions: QuestionItem[] = [];
-
-  records.forEach((rec, idx) => {
-    const rawText = rec.text.replace(/<[^>]+>/g, '');
-    const highlightsToUse =
-      rec.highlightSpans && rec.highlightSpans.length > 0
-        ? rec.highlightSpans
-        : extractKeySentencesFromRawText(rawText);
-
-    highlightsToUse.forEach((hl, hIdx) => {
-      const competency =
-        rec.subject.includes('진로') || rec.tags.some((t) => t.includes('진로'))
-          ? 'career'
-          : rec.subject.includes('자율') || rec.subject.includes('봉사')
-          ? 'community'
-          : 'academic';
-
-      questions.push({
-        id: `q-rule-${idx}-${hIdx}`,
-        competency,
-        type: 'record',
-        grade: rec.grade,
-        subject: rec.subject,
-        highlightText: hl,
-        question: `${rec.grade} ${rec.subject} 활동 중 "${hl.slice(0, 45)}…"라고 기록되어 있습니다. 이 탐구를 진행하게 된 직접적인 동기와, 이 과정에서 겪은 가장 인상 깊은 경험 및 배운 점을 설명해 주세요.`,
-        intent: `${rec.subject} 교과 내 주도적 탐구 역량 및 실제 활동 진위 여부 검증`,
-        points: [
-          '교과 수업 내용에서 출발한 호기심 및 탐구 동기 구체화',
-          '탐구/실험 과정 중 마주친 기술적·이론적 어려움과 해결책',
-          '활동 후 심화 학습으로 이어진 발전 과정 및 전공 연계성',
-        ],
-        followUps: [
-          '그 활동을 진행하면서 본인이 기존에 알던 상식과 달랐던 점이 있었나요?',
-          '당시 활동을 다시 진행한다면 어떤 점을 보완하여 더 완성도 높게 발전시키고 싶습니까?',
-        ],
-        completed: false,
-      });
-    });
-  });
-
-  // 지원 학과 및 대학 맞춤 질문 추가
-  questions.unshift({
-    id: 'q-univ-1',
-    competency: 'university',
-    type: 'university',
-    subject: '지원동기 및 인재상',
-    question: `수많은 대학 중 특별히 ${profile.targetUniversity || '지원 대학'} ${profile.targetMajor || '지원 학과'}에 지원하게 된 결정적인 이유와, 학생부 속 어떤 경험이 본인을 우리 학과에 적합한 인재로 만들었다고 생각하나요?`,
-    intent: '대학 인재상 부합 여부 및 진정성 있는 지원 동기 검증',
-    points: [
-      `${profile.targetUniversity || '지원 대학'}만의 커리큘럼이나 교수진, 비전 언급`,
-      '학생부의 핵심 탐구 활동과 학과의 연계성 제시',
-      '입학 후 구체적인 학업 및 진로 계획 피력',
-    ],
-    followUps: [
-      `만약 대학 입학 후 본인이 기대했던 ${profile.targetMajor || '전공'}의 수업과 현실이 다르다면 어떻게 대처하시겠습니까?`,
-    ],
-    completed: false,
-  });
-
-  // 약점/압박 질문 추가
-  questions.push({
-    id: 'q-pressure-1',
-    competency: 'academic',
-    type: 'pressure',
-    subject: '학업/성적 약점 방어',
-    question: `학생부를 전반적으로 검토했을 때, 다른 영역에 비해 상대적으로 성적이 하락했거나 활동의 깊이가 아쉬운 부분이 보입니다. 본인은 이에 대해 어떻게 생각하며 어떻게 보완했습니까?`,
-    intent: '위기 대처 능력 및 실패에 대한 솔직한 성찰과 극복 의지 확인',
-    points: [
-      '변명 대신 원인을 솔직하고 담백하게 인정',
-      '문제를 인식한 후 바꾼 구체적인 공부법이나 노력 강조',
-      '그 경험을 통해 배운 회복탄력성과 성숙한 태도',
-    ],
-    followUps: ['그 보완 노력이 실제 이후 학기나 다른 활동에서 어떤 긍정적 변화를 이끌어냈나요?'],
-    defense: '성적 변명보다는 극복 과정에서 얻은 교훈에 초점을 맞추어 답변을 전개하세요.',
-    completed: false,
-  });
-
-  // 학생부 항목 수에 관계없이 총 50개 문항이 될 때까지 동적으로 보충
-  if (questions.length < 50 && records.length > 0) {
-    let loopIdx = 0;
-    while (questions.length < 50 && loopIdx < records.length * 4) {
-      const rec = records[loopIdx % records.length];
-      const deepId = `q-deep-${questions.length + 1}`;
-
-      questions.push({
-        id: deepId,
-        competency: rec.subject.includes('진로') ? 'career' : 'academic',
-        type: 'deep',
-        grade: rec.grade,
-        subject: rec.subject,
-        question: `${rec.grade} ${rec.subject} 활동에서 탐구한 내용을 ${profile.targetMajor || '지원 전공'} 분야의 실제 사회적 이슈나 학문적 쟁점과 연결 지어 본인의 견해를 말씀해 보세요.`,
-        intent: '학문 간 융합 사고력 및 전공 분야로의 확장 적용 능력 검증',
-        points: [
-          `${rec.subject}의 핵심 개념 요약`,
-          `${profile.targetMajor || '지원 학과'}의 실제 사례나 연구 분야와 연결`,
-          '자신만의 비판적 시각 및 해결 방안 제시',
-        ],
-        followUps: [
-          '그 적용 과정에서 발생할 수 있는 현실적 한계나 예상되는 반론은 무엇인가요?',
-        ],
-        completed: false,
-      });
-      loopIdx++;
-    }
-  }
-
-  return questions.slice(0, 50).map((q, idx) => sanitizeQuestionItem(q, idx + 1));
-}
 
 /**
  * QuestionItem 필드 안전화 (null, undefined, 비정상 타입 원천 차단)
@@ -471,5 +332,12 @@ export function sanitizeQuestionItem(q: any, defaultNum: number): QuestionItem {
     defense: q?.defense ? String(q.defense) : undefined,
     userNotes: q?.userNotes ? String(q.userNotes) : '',
     completed: Boolean(q?.completed),
+    starred: Boolean(q?.starred),
+    isCommon: Boolean(q?.isCommon),
+    srcBadge: q?.srcBadge ? String(q.srcBadge) : undefined,
+    catGroup: q?.catGroup,
+    tplId: q?.tplId ? String(q.tplId) : undefined,
+    ansLabel: q?.ansLabel ? String(q.ansLabel) : undefined,
+    tip: q?.tip ? String(q.tip) : undefined,
   };
 }

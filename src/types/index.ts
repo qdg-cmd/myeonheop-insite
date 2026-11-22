@@ -27,6 +27,11 @@ export interface QuestionItem {
   completed?: boolean;
   starred?: boolean;
   isCommon?: boolean;
+  srcBadge?: string;
+  catGroup?: 'univ_q' | 'cases' | 'qb' | 'record' | 'common' | 'fusion' | 'past';
+  tplId?: string;
+  ansLabel?: string;
+  tip?: string;
 }
 
 export interface StudentProfile {

@@ -212,7 +212,7 @@ export function generateDocxBlob(profile: StudentProfile, starredOnly: boolean =
         ...(q.starred ? [{ t: '★ [핵심] ', b: true, sz: 26, color: 'D97706' }] : []),
         { t: `문항 ${idx + 1}. `, b: true, sz: 26, color: '1E40AF' },
         { t: `[${q.grade ? `${q.grade} ` : ''}${q.subject || '공통'}] `, b: true, sz: 24, color: '374151' },
-        { t: `${compLabel} · ${typeLabel}`, sz: 22, color: '4B5563' },
+        { t: `${compLabel} · ${typeLabel}${q.srcBadge ? ` · ${q.srcBadge.replace(/^\[+|\]+$/g, '')}` : ''}`, sz: 22, color: '4B5563' },
       ],
       keepNext: true,
       spacingAfter: 80,
@@ -259,7 +259,7 @@ export function generateDocxBlob(profile: StudentProfile, starredOnly: boolean =
       paras.push({
         style: 'Normal',
         runs: [
-          { t: `■ 필수 답변 키워드 & 포인트:`, b: true, sz: 20, color: '047857' },
+          { t: `■ ${q.ansLabel || '필수 답변 키워드 & 포인트'}:`, b: true, sz: 20, color: '047857' },
         ],
         indentLeft: 240,
         spacingAfter: 40,
