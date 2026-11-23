@@ -1,5 +1,5 @@
 import { ApiKeys, QuestionItem, StudentProfile, StudentRecordItem } from '../types';
-import { generateStandardRuleQuestions } from './ruleEngine';
+import { generateStandardRuleQuestions, stripHtmlTags } from './ruleEngine';
 import { maskPersonalInfo } from './masking';
 import { loadPastExamData } from './pastExamLoader';
 
@@ -316,8 +316,8 @@ export function sanitizeQuestionItem(q: any, defaultNum: number): QuestionItem {
       : 'record',
     grade: q?.grade ? String(q.grade) : '',
     subject: q?.subject ? String(q.subject) : '',
-    highlightText: q?.highlightText ? String(q.highlightText) : '',
-    question: q?.question ? String(q.question) : '면접 질문 내용을 불러오지 못했습니다.',
+    highlightText: q?.highlightText ? stripHtmlTags(String(q.highlightText)) : '',
+    question: q?.question ? stripHtmlTags(String(q.question)) : '면접 질문 내용을 불러오지 못했습니다.',
     intent: q?.intent ? String(q.intent) : '지원자의 역량 검증',
     points: Array.isArray(q?.points)
       ? q.points.filter((p: any) => p != null).map((p: any) => String(p))

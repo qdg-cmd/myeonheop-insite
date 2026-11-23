@@ -15,6 +15,7 @@ import { StudentRecordItem } from '../types';
 import { parseCustomStudentRecordHtml } from '../lib/htmlParser';
 import { parsePdfOrTextFile } from '../lib/pdfParser';
 import { maskPersonalInfo } from '../lib/masking';
+import { stripHtmlTags } from '../lib/ruleEngine';
 
 export interface StudentInputProfile {
   name: string;
@@ -159,7 +160,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
         interviewType,
         records: item.records.map((r) => ({
           ...r,
-          text: (r.text || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s{2,}/g, ' ').trim(),
+          text: stripHtmlTags(r.text || ''),
         })),
         includeCommonQuestions,
         customKeywords: item.customKeywordsInput
@@ -175,7 +176,7 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
       }
 
       const { maskedText } = maskPersonalInfo(pastedText, pastedName || '학생A');
-      const cleanPasted = (maskedText || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s{2,}/g, ' ').trim();
+      const cleanPasted = stripHtmlTags(maskedText || '');
       const pastedRecord: StudentRecordItem = {
         id: `rec-pasted-${Date.now()}`,
         grade: '공통',

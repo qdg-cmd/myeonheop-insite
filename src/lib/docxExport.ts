@@ -240,7 +240,7 @@ export function generateDocxBlob(profile: StudentProfile, starredOnly: boolean =
         style: 'Normal',
         runs: [
           { t: `[생기부 근거 원문] `, b: true, sz: 20, color: 'B45309' },
-          { t: `"${q.highlightText.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim()}"`, italic: true, sz: 20, color: '92400E' },
+          { t: `"${q.highlightText.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/<[^>]+>/g, '').trim()}"`, italic: true, sz: 20, color: '92400E' },
         ],
         indentLeft: 240,
         spacingAfter: 80,

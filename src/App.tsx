@@ -9,7 +9,7 @@ import {
   saveStoredApiKeys,
 } from './lib/db';
 import { generateInterviewQuestions, sanitizeQuestionItem } from './lib/gemini';
-import { generateAdditionalRuleQuestions, generateSubject3Questions } from './lib/ruleEngine';
+import { generateAdditionalRuleQuestions, generateSubject3Questions, stripHtmlTags } from './lib/ruleEngine';
 import { generateCommon10Questions } from './lib/commonQuestions';
 import { Header } from './components/Header';
 import { ApiKeyModal } from './components/ApiKeyModal';
@@ -47,6 +47,10 @@ export function App() {
         const loaded = await getAllStudents();
         const sanitized = loaded.map((std) => ({
           ...std,
+          records: (std.records || []).map((r) => ({
+            ...r,
+            text: stripHtmlTags(r.text || ''),
+          })),
           questions: (std.questions || []).map((q, i) => {
             const sq = sanitizeQuestionItem(q, i + 1);
             // 대학 공통 필수 질문 10선은 기본으로 '★ 핵심 질문' 별표 활성화
@@ -270,6 +274,11 @@ export function App() {
     const profileWithNewId: StudentProfile = {
       ...imported,
       id: `std-${Date.now()}`,
+      records: (imported.records || []).map((r) => ({
+        ...r,
+        text: stripHtmlTags(r.text || ''),
+      })),
+      questions: (imported.questions || []).map((q, i) => sanitizeQuestionItem(q, i + 1)),
     };
     await saveStudent(profileWithNewId);
     setStudents((prev) => [profileWithNewId, ...prev]);

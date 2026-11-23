@@ -15,6 +15,7 @@ export function stripHtmlTags(text: string): string {
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -146,7 +147,59 @@ export function cleanKoreanSpacing(text: string): string {
     [/결\s*과\s*를/g, '결과를'],
     [/결\s*과(?=[^가-힣]|$)/g, '결과'],
     [/기\s*준\s*으\s*로/g, '기준으로'],
-    [/기\s*준(?=[^가-힣]|$)/g, '기준']
+    [/기\s*준(?=[^가-힣]|$)/g, '기준'],
+    // 실전 9개 파일 자간 깨짐 복원 29종
+    [/적\s*극\s*성/g, '적극성'],
+    [/우\s*수\s*하\s*며/g, '우수하며'],
+    [/기\s*댓\s*값/g, '기댓값'],
+    [/전\s*체/g, '전체'],
+    [/일\s*렁\s*일\s*렁/g, '일렁일렁'],
+    [/마\s*음/g, '마음'],
+    [/직\s*관/g, '직관'],
+    [/대\s*비/g, '대비'],
+    [/투\s*명\s*하\s*게/g, '투명하게'],
+    [/꾸\s*준\s*한/g, '꾸준한'],
+    [/진\s*로\s*로\s*드\s*맵/g, '진로로드맵'],
+    [/카\s*드\s*뉴\s*스/g, '카드뉴스'],
+    [/희\s*망/g, '희망'],
+    [/조\s*사/g, '조사'],
+    [/정\s*리/g, '정리'],
+    [/결\s*합/g, '결합'],
+    [/범\s*죄/g, '범죄'],
+    [/운\s*영/g, '운영'],
+    [/가\s*치/g, '가치'],
+    [/부\s*과/g, '부과'],
+    [/학\s*습/g, '학습'],
+    [/친\s*구/g, '친구'],
+    [/괴\s*사/g, '괴사'],
+    [/작\s*동/g, '작동'],
+    [/수\s*행/g, '수행'],
+    [/염\s*류\s*화/g, '염류화'],
+    [/변\s*화/g, '변화'],
+    [/스\s*펙\s*트\s*럼/g, '스펙트럼'],
+    [/염\s*색\s*체/g, '염색체'],
+    [/유\s*전\s*정\s*보/g, '유전정보'],
+    [/돌\s*연\s*변\s*이/g, '돌연변이'],
+    [/방\s*정\s*식/g, '방정식'],
+    [/빅\s*데\s*이\s*터/g, '빅데이터'],
+    [/인\s*공\s*지\s*능/g, '인공지능'],
+    [/딥\s*러\s*닝/g, '딥러닝'],
+    [/머\s*신\s*러\s*닝/g, '머신러닝'],
+    [/신\s*경\s*망/g, '신경망'],
+    [/뉴\s*런\s*망/g, '뉴런망'],
+    [/블\s*록\s*체\s*인/g, '블록체인'],
+    [/프\s*로\s*젝\s*트/g, '프로젝트'],
+    [/아\s*이\s*디\s*어/g, '아이디어'],
+    [/피\s*드\s*백/g, '피드백'],
+    [/모\s*니\s*터\s*링/g, '모니터링'],
+    [/프\s*레\s*젠\s*테\s*이\s*션/g, '프레젠테이션'],
+    [/포\s*트\s*폴\s*리\s*오/g, '포트폴리오'],
+    [/멘\s*토\s*링/g, '멘토링'],
+    [/캠\s*페\s*인/g, '캠페인'],
+    [/모\s*의\s*면\s*접/g, '모의면접'],
+    [/가지고이\s+/g, '가지고 이 '],
+    [/가지고이(?=[가-힣])/g, '가지고 이 '],
+    [/향후이\s*러한/g, '향후 이러한']
   ];
 
   for (const [re, rep] of MERGE_PATTERNS) {
@@ -160,7 +213,7 @@ export function cleanKoreanSpacing(text: string): string {
   s = s.replace(/\s+\./g, '.');
 
   // 4. 한글 명사 뒤 조사/접미사 앞의 비정상 공백 복원
-  s = s.replace(/([가-힣])\s+(을|를|이|가|은|는|의|에|로|와|과|도|만|에게|으로|에서|부터|까지|하여|하고|하며|했다|된다|이다|적|적인|적으로|히|인|임|해|였다고|였음|시켜|시켰|되며|된다|함|임|서)(?=[^가-힣]|$)/g, '$1$2');
+  s = s.replace(/([가-힣])\s+(을|를|이|가|은|는|의|에|로|와|과|도|만|에게|으로|에서|부터|까지|하여|하고|하며|했다|된다|이다|적인|적으로|히|인|임|해|였다고|였음|시켜|시켰|되며|된다|함|임|서)(?=[^가-힣]|$)/g, '$1$2');
 
   return s;
 }
@@ -201,12 +254,15 @@ export function jung(ch: string): number {
 
 export function hasBatchim(w: string): boolean {
   if (!w) return false;
-  const clean = String(w).replace(/[‘'“"”’)}\]>》」』\s]+$/g, '').trim();
+  // 문자열 끝의 문장부호(?, !, .), 따옴표, 괄호 등 모든 기호 제거 후 마지막 음절 추출
+  const clean = String(w).replace(/[.,!?:;~'’"“”`)\(\[\]\{\}<>》」』\s]+$/g, '').trim();
   if (!clean) return false;
   const ch = clean.slice(-1);
   if (!HANGUL.test(ch)) {
     return /[013678LMNR]$/i.test(ch);
   }
+  // 보조사 '는'으로 끝나는 질문구·어절은 받침 없는 음운 환경(개수 등)으로 취급
+  if (ch === '는') return false;
   return jong(ch) > 0;
 }
 
@@ -660,6 +716,55 @@ const CONTEXT_SENSITIVE_CONCEPTS: Record<string, { required: RegExp; forbidden: 
   불평등: {
     required: /(?:사회|계층|소득|분배|양극화|기회|격차)/,
     forbidden: /(?:조약|불평등\s*조약|강화도|개항|외교|역사)/
+  },
+  // 실전 9개 파일 동음이의어·부분일치 문맥 가드 보강
+  탐색: {
+    required: /(?:이진|BFS|DFS|그래프|트리|알고리즘|코딩|자료구조)/i,
+    forbidden: /(?:진로\s*탐색|계열\s*탐색|어휘\s*탐색|자료\s*탐색|관계를\s*탐색|진로와\s*직업|희망\s*분야)/
+  },
+  극성: {
+    required: /(?:분자|결합|공유|전기\s*음성도|쌍극자|무극성|화학)/,
+    forbidden: /(?:적극성|적\s*극성|성격|태도|인성)/
+  },
+  번역: {
+    required: /(?:DNA|RNA|mRNA|리보솜|코돈|아미노산|전사|단백질)/i,
+    forbidden: /(?:기계\s*번역|영어\s*번역|번역기|일어\s*번역|원서|외국어)/
+  },
+  선행: {
+    required: /(?:환자|의료|임상|병원|의사|간호|사전\s*동의|생명\s*윤리)/,
+    forbidden: /(?:선행\s*연구|선행\s*학습|선행\s*사례|선행\s*활동|선행\s*실험)/
+  },
+  사회성: {
+    required: /(?:언어|자의성|역사성|창조성|국어|문법|기호)/,
+    forbidden: /(?:체육|스포츠|친구|대인관계|인성|협동|교우|리더십|모둠)/
+  },
+  공진: {
+    required: /(?:회로|RLC|주파수|교류|전류|인덕터|커패시터)/i,
+    forbidden: /(?:선박|파도|해양|지진|지구과학|바다)/
+  },
+  인과관계: {
+    required: /(?:상관|통계|확률|데이터|변수|표본|수치|회귀)/,
+    forbidden: /(?:인과관계\s*없이|소설|문학|서사|이야기|갈등|인물)/
+  },
+  넓이: {
+    required: /(?:적분|구분구적|곡선|넓이와\s*부피|미적분)/,
+    forbidden: /(?:삼각형의\s*넓이|사각형의\s*넓이|사인법칙|코사인법칙|도형|피타고라스)/
+  },
+  로봇: {
+    required: /(?:하드웨어|기계|센서|구동|아두이노|라즈베리|모터|메카|제어|자율|로보틱스|지능형|보행)/,
+    forbidden: /(?:로봇\s*계정|로봇\s*기술.*법|윤리|법령|인간과\s*로봇|로봇세)/
+  },
+  제어: {
+    required: /(?:로봇|모터|액추에이터)/,
+    forbidden: /(?:단순\s*제어|통제|감정\s*제어|자기\s*제어|제어\s*시스템)/
+  },
+  호흡: {
+    required: /(?:세포|산소|이산화탄소|ATP|미토콘드리아|포도당|유산소|무산소|발효)/,
+    forbidden: /(?:체육|스포츠|경기|호흡을\s*맞추|찰떡호흡|팀워크)/
+  },
+  간섭: {
+    required: /(?:파동|빛|슬릿|위상|보강|상쇄|회절|물리)/,
+    forbidden: /(?:삼국\s*간섭|내정\s*간섭|부당한\s*간섭|역사)/
   }
 };
 
@@ -693,9 +798,12 @@ export function findConcepts(t: string, dynamicKeywords?: KeywordScore[] | strin
     }
 
     if (matched) {
-      const guard = CONTEXT_SENSITIVE_CONCEPTS[c.term];
+      const guard = CONTEXT_SENSITIVE_CONCEPTS[c.term] || CONTEXT_SENSITIVE_CONCEPTS[CONCEPTS[c.i][0]];
       if (guard) {
-        if (guard.forbidden.test(t) || !guard.required.test(t)) {
+        if (guard.forbidden && guard.forbidden.test(t)) {
+          matched = false;
+        }
+        if (guard.required && !guard.required.test(t)) {
           matched = false;
         }
       }
@@ -752,14 +860,14 @@ const FLAG_RE: Record<string, RegExp> = {
   inquiry: /탐구|조사|분석|연구|고찰|규명|비교/,
   experiment: /(?:실험|측정|변인|가설|대조군|실험군|조작\s*변인|통제\s*변인|(?:현미경|시료|용액|세포|생장|반응을|결과를)\s*관찰)/,
   make_hw: /(?:하드웨어|회로|센서|아두이노|라즈베리|펠티어|아쿠아포닉스|냉실|장치|키트|시제품|프로토타입|로봇|모터|전동기|발전기|태양광\s*패널|배터리|소자|임베디드|드론|기기\s*제작|장치를\s*제작|장치를\s*만들|키트를\s*제작)/,
-  make_sw: /알고리즘|소프트웨어|프로그램|프로그래밍|애플리케이션|\b앱\b|시뮬레이션|데이터베이스|웹사이트|파이썬|자바스크립트|인공지능|머신러닝|딥러닝|코딩|개발하|구현하/,
+  make_sw: /알고리즘|소프트웨어|(?<!재|리)프로그램|(?<!재|리)프로그래밍|애플리케이션|\b앱\b|시뮬레이션|데이터베이스|웹사이트|파이썬|자바스크립트|인공지능|머신러닝|딥러닝|코딩|개발하|구현하/,
   make_content: /(?:인포그래픽|포스터|카드\s*뉴스|카드뉴스|소책자|리플릿|영상|동영상|UCC|홍보물|소식지|팸플릿|뉴스레터|웹툰|만화|자료집|안내서|브로슈어)/,
   make: /제작|설계|코딩|구현|프로그램|앱|만들/,
   present: /발표|설명함|소개함|강연|수업을 (?:기획|진행)|내가 만든 수업/,
   report: /보고서|소논문|논술|에세이|글을 작성|서평|감상문|칼럼|기사/,
   debate: /토론|찬반|반론|입론|반박/,
   read: /읽고|도서|독서|서평/,
-  leader: /반장|회장|부회장|부장|팀장|모둠장|조장|대표(?!성|적)|리더|총괄/,
+  leader: /(?<!국가)(?<!국가\s*)대표(?!팀|적|성|하는)|반장|회장|부회장|부장|팀장|모둠장|조장|리더|총괄/,
   conflict: /갈등|의견\s*차이|의견을\s*조율|조율|중재/,
   coop: /협력|협업|협동|함께|팀원|모둠원|구성원/,
   care: /배려|봉사|나눔|도움|도와|멘토|멘티|도우미|튜터/,
@@ -873,12 +981,31 @@ export function analyze(s: SentenceItem, ctx: { major: string; majorKw: string[]
     }
   }
 
-  // 문맥 가드 3: 소프트웨어(make_sw) - 직접 코딩/개발 행동 검증 및 단순 활용 배제
+  // 문맥 가드 3: 소프트웨어(make_sw) - 직접 코딩/개발 행동 검증 및 단순 활용 배제 (재프로그래밍 등 배제)
   if (f.make_sw) {
-    const isFalseSw = /(?:프로그램을\s*(?:활용|적용|비교)|교육\s*프로그램|사례를\s*조사|알고리즘\s*도입|통계적\s*추정\s*알고리즘|AI\s*프로그램\s*활용)/.test(t);
+    const isFalseSw = /(?:프로그램을\s*(?:활용|적용|비교)|교육\s*프로그램|사례를\s*조사|알고리즘\s*도입|통계적\s*추정\s*알고리즘|AI\s*프로그램\s*활용|재프로그래밍|리프로그래밍)/.test(t);
     const hasActualSwDev = /(?:코딩|프로그래밍|코드를\s*작성|앱을\s*(?:제작|개발)|프로그램을\s*개발|직접\s*구현|소프트웨어.*개발)/.test(t);
-    if (isFalseSw || !hasActualSwDev) {
+    if (isFalseSw || !hasActualSwDev || /(?:재프로그래밍|리프로그래밍)/.test(t)) {
       f.make_sw = false;
+    }
+  }
+
+  // 문맥 가드 3-1: 콘텐츠 제작(make_content) - 단순 시청/분석 배제 및 직접 제작 동사 검증
+  if (f.make_content) {
+    const isPassive = /(?:영상을\s*시청|영상을\s*감상|콘텐츠를\s*분석|미디어\s*스트리밍|장치까지\s*연결|콘텐츠\s*분석|영상\s*시청|영상\s*자료를\s*활용)/.test(t);
+    const hasDirectProduction = /(?:제작|만들|디자인|편집|구축|개발|그리|작성)/.test(t);
+    if (isPassive || !hasDirectProduction) {
+      f.make_content = false;
+    }
+  }
+
+  // 문맥 가드 3-2: 리더십(leader) - 국가대표, 대표팀, 대표적 등 배제
+  if (f.leader) {
+    if (/(?:국가대표|대표팀|대표적|대표하는|대표곡)/.test(t)) {
+      const strippedT = t.replace(/(?:국가대표|대표팀|대표적|대표하는|대표곡)/g, '');
+      if (!/(?:반장|회장|부회장|부장|팀장|모둠장|조장|리더|총괄|동아리장|학생회)/.test(strippedT)) {
+        f.leader = false;
+      }
     }
   }
 
@@ -1039,8 +1166,20 @@ export function isValidInquiryTopic(q: string): boolean {
   if (!q) return false;
   const t = q.trim();
   if (t.length <= 2) return false;
-  // 1. 단순 교과목명 차단
-  if (/^(?:국어|문학|수학|영어|사회|과학|역사|한국사|음악|미술|체육|도덕|윤리|독서|화작|기하|물리|화학|생명|지구|한문|일본어)$/.test(t)) {
+  // 1. 추상어/고유어/과목 차단
+  if (/^(?:평온함|콩레이|모나리자|국어|문학|수학|영어|사회|과학|음악|미술|체육|도덕|윤리|독서|화작|기하|물리|화학|생명|지구|한문|일본어|희망|행복|사랑|우정|나눔|배려|위로|슬픔|열정|노력|성실|도전|꿈|자신감)$/.test(t)) {
+    return false;
+  }
+  // 1-1. 교과목명 차단
+  if (/^(?:화법과\s*작문|언어와\s*매체|독서와\s*문법|문학과\s*매체|수학[ⅠⅡI0-9_]*|미적분|확률과\s*통계|기하|물리학[ⅠⅡI0-9_]*|화학[ⅠⅡI0-9_]*|생명과학[ⅠⅡI0-9_]*|지구과학[ⅠⅡI0-9_]*|한국사|동아시아사|세계사|생활과\s*윤리|윤리와\s*사상|사회·문화|정치와\s*법|경제|세계지리|한국지리)$/.test(t)) {
+    return false;
+  }
+  // 1-2. 데이터베이스/사이트명 차단
+  if (/(?:한국고전종합자료|DBpia|디비피아|RISS|리스|KISS|포털사이트|구글|네이버|위키백과|나무위키|통계청|국회도서관)/.test(t)) {
+    return false;
+  }
+  // 1-3. 영어 문법·어휘 조각 차단
+  if (/(?:하는\s*경향이\s*있다|tend\s*to|경향이\s*있다|할\s*수\s*있다)/.test(t)) {
     return false;
   }
   // 2. 쉼표 나열 어휘 목록 차단 (예: '부과, 예의, 따르다', '불안, 칭얼거리다, 제거')
@@ -1049,8 +1188,8 @@ export function isValidInquiryTopic(q: string): boolean {
   if (/(?:한\s*학기\s*한\s*권|독서\s*활동|독서\s*마라톤|수행평가|동아리\s*활동|발표회|학습\s*플래너|아침\s*독서|멘토링|모둠\s*활동|자율\s*활동)/.test(t)) {
     return false;
   }
-  // 4. 단순 인용 문구, 시 제목, 문학 구절 차단 (예: '희망에 대해서', '새벽 첫차', '진정한 부자는...')
-  if (/(?:…|\.{2,}|~|첫차|새벽\s*첫차|진정한\s*부자|에\s*대해서|에\s*대하여|에\s*관해서|을\s*위하여)$/.test(t)) {
+  // 4. 단순 인용 문구, 시 제목, 문학 구절, 단순 명언 차단 (예: '희망에 대해서', '새벽 첫차', '~한 일이 없는 사람이다', '~배부른 사람이 아니라')
+  if (/(?:…|\.{2,}|~|첫차|새벽\s*첫차|진정한\s*부자|에\s*대해서|에\s*대하여|에\s*관해서|을\s*위하여|사람이다|아니다|사람이\s*아니라|일이\s*없는\s*사람|것이다|때문이다)$/.test(t)) {
     return false;
   }
   // 5. 비학술적 서술어 파편/동사어간 차단 (예: '칭얼거리다', '나누며', '주어진', '모둠원', '학교생활')
@@ -1093,6 +1232,11 @@ export function toPastClause(chunk: string): string | null {
     if (HANGUL.test(prevChar)) {
       return balanceQuotes(c.slice(0, -1) + (hasBatchim(prevChar) ? '이었다고' : '였다고'));
     }
+  }
+
+  // 형용사 연결어미(~하고)가 단독으로 절단된 경우 변환 거부 (단순했다고, 명확했다고 등 방지)
+  if (/(?:단순|명확|정확|완전|솔직|풍부|균형|적절|생생|친절|유연|자신\s*있|깊이\s*있)하고$/.test(c)) {
+    return null;
   }
 
   const rules: Array<[RegExp, string]> = [
@@ -1147,8 +1291,8 @@ const LEAD_RE = /^(또한|특히|나아가|더 나아가|이어|이어서|그리
 export function clauseFor(s: SentenceItem, anchor?: string | null): string | null {
   const fullText = stripHtmlTags(s.qtext || s.text).replace(/\s*\.$/, '').replace(LEAD_RE, '');
   let cleanFull = cleanKoreanSpacing(fullText);
-  // 잔여 노이즈 제거: 시간 표기 및 앞머리 표 잔여 헤더 제거
-  cleanFull = cleanFull.replace(/\(?\[?\d+시간\]?\)?/g, '').replace(/^(?:교사|과학|에서|에는)\s+/, '').trim();
+  // 잔여 노이즈 제거: 시간 표기((25시간) 등) 및 앞머리 표 잔여 헤더 완전 제거
+  cleanFull = cleanFull.replace(/\(?\s*\[?\s*\d+\s*시간\s*\]?\s*\)?/g, '').replace(/^(?:교사|과학|에서|에는)\s+/, '').trim();
 
   // 내부 마침표가 있을 경우 단일 문장으로 분리 후 anchor가 있는 문장 선택 (날짜 분절 방지)
   const singleSents = cleanFull.split(/(?<=(?<!\d)[.?!])\s+/).map((x) => x.trim()).filter((x) => x.length >= 8);
@@ -1176,7 +1320,8 @@ export function clauseFor(s: SentenceItem, anchor?: string | null): string | nul
   }
   const isInsideQuote = (pos: number) => quoteRanges.some(([start, end]) => pos >= start && pos <= end);
 
-  const delimRe = /(?<=(?:하고|하며|하여|하였으며|했으며|하였고|했고|이며|으며|였으며|되며|되어|되고|읽고|보고|통해|바탕으로|위해|위하여|결과|후)),?\s+/g;
+  // 형용사 연결어미(~하고 명확한 등)는 절단 금지
+  const delimRe = /(?<=(?:하며|하여|하였으며|했으며|하였고|했고|이며|으며|였으며|되며|되어|되고|읽고|보고|통해|바탕으로|위해|위하여|결과|후|하고(?!\s*(?:명확|자신|정확|깊이|새로|다양|자세|구체|효과|창의|체계|[가-힣]{2,4}[은는한적])))),?\s+/g;
   const parts: string[] = [];
   let lastPos = 0;
   let dm: RegExpExecArray | null;
@@ -1213,9 +1358,9 @@ export function clauseFor(s: SentenceItem, anchor?: string | null): string | nul
     return toPastClause(t);
   }
 
-  // 앞머리 불완전 접속사/연결어 정돈 및 찌꺼기 절단 감지
+  // 앞머리 불완전 접속사/연결어 정돈 및 찌꺼기 절단(있던, 접하는, 요소 간의, 시간 탐구 등) 감지 시 전체 문장 복원
   seg = seg.replace(LEAD_RE, '');
-  if (/^(?:[…,]|\s*(?:있으며|없으며|통해|위해|대해|기른|보인|높인|갖춘|펼친|이끈|이룬|담은|담아|거쳐|해석하였으\s*며|산출하는\s*과정|에는|기억함으로))/i.test(seg) || seg.length < 18) {
+  if (/^(?:[…,]|\s*(?:있으며|없으며|통해|위해|대해|기른|보인|높인|갖춘|펼친|이끈|이룬|담은|담아|거쳐|해석하였으\s*며|산출하는\s*과정|에는|기억함으로|있던|접하는|요소\s*간의|시간\s*탐구))/i.test(seg) || seg.length < 18) {
     return toPastClause(t);
   }
   seg = seg.replace(/^(?:있으며|없으며|통해|위해|대해|기른|보인|높인|갖춘|펼친|이끈|이룬|담은|담아|거쳐|통하여|위하여|대하여|바탕으로|에는|교사|과학|에서)\s+/g, '');
@@ -1241,16 +1386,20 @@ export function recordLabel(s: SentenceItem): string {
 export function lead(s: SentenceItem, anchor?: string | null, variantIdx?: number): string {
   const c = clauseFor(s, anchor);
   const label = recordLabel(s);
-  const v = typeof variantIdx === 'number' ? variantIdx % 4 : ((s.pi || 0) + (typeof s.rid === 'number' ? s.rid : 0)) % 4;
+  let v = typeof variantIdx === 'number' ? variantIdx % 4 : ((s.pi || 0) + (typeof s.rid === 'number' ? s.rid : 0)) % 4;
   if (c) {
     const balancedC = balanceQuotes(c);
+    // [마감 4] 리드문 끝이 '인상적이었다'로 끝날 때 4번 화법(~는 점이 인상적인데,) 대신 0번 화법 선택
+    if (/인상적(?:이었|었|다)/.test(balancedC) && v === 3) {
+      v = 0;
+    }
     if (v === 1) return balanceQuotes(`${label} 기록을 보면 ${balancedC.replace(/고$/, '는')} 내용이 눈에 띕니다.`);
     if (v === 2) return balanceQuotes(`${label} 활동에서 ${balancedC} 기재되어 있는데,`);
     if (v === 3) return balanceQuotes(`${label} 관련하여 ${balancedC.replace(/고$/, '는')} 점이 인상적인데,`);
     return balanceQuotes(`${label} ${balancedC} 되어 있는데,`);
   }
   let t = stripHtmlTags(s.qtext || s.text).replace(/\s*\.$/, '');
-  t = cleanKoreanSpacing(t).replace(/\(?\[?\d+시간\]?\)?/g, '').replace(/^(?:교사|과학|에서|에는)\s+/, '').trim();
+  t = cleanKoreanSpacing(t).replace(/\(?\s*\[?\s*\d+\s*시간\s*\]?\s*\)?/g, '').replace(/^(?:교사|과학|에서|에는)\s+/, '').trim();
   const single = t.split(/(?<=(?<!\d)[.?!])\s+/)[0] || t;
   if (single.length > 75) t = single.slice(0, 72) + '…';
   else t = single;
@@ -1303,7 +1452,8 @@ function pick(arr?: string[]): string {
 export function candidatesFrom(s: SentenceItem, ctx: { major: string; majorKw: string[] }): CandidateQuestion[] {
   const out: CandidateQuestion[] = [];
   const M = ctx.major || '지원 학과';
-  const topic = s.quotes.find((q) => !q.book && isValidInquiryTopic(q.q));
+  const isMusicSubj = Boolean(s.subj && /음악/.test(s.subj));
+  const topic = isMusicSubj ? undefined : s.quotes.find((q) => !q.book && isValidInquiryTopic(q.q));
   const book = s.quotes.find((q) => q.book);
   const anc = (topic && topic.q) || (book && book.q) || (s.concepts[0] && s.concepts[0].term) || null;
   const f = s.f;
@@ -1921,6 +2071,7 @@ export function cleanPastAnswer(ansText?: string | null): string | null {
   if (/TIP|특수목적대학|진로진학지원센터|부산대학교|울산진로|부산진로|면접후기|합격수기|\{|\}/i.test(t)) return null;
   if (/(?:껄어|여쑤어|득히|신자생|학습하겠음|어려웠음)/.test(t)) return null;
   if (/(?:혁생|선골|독득|퍼이지|닌도|범랍|상성형|고촬|확습|역할은및|좋은및것|때이\s|(?<![가-힣])입하(?![가-힣])|형징|폭날게|층미|개획|경철행정|목묘|(?<![가-힣])하당(?![가-힣])|수단만으로대하는)/.test(t)) return null;
+  if (/(?:질문\s*및\s*을|국제\s*답변\s*사회|답변\s+[가-힣]+의)/.test(t)) return null;
   if (/(?:기억이\s*나지|기억안|모르겠|없음|작성하지\s*않음|해당\s*없음)/.test(t)) return null;
   t = t.replace(/^(?:답변\s*[:：]|학생\s*[:：]|지원자\s*[:：]|답변\s*☞\s*)\s*/, '').trim();
   if (!/[.?!]$/.test(t)) return null;
@@ -1967,11 +2118,11 @@ export function stripQPrefix(str: string): string {
   return s.replace(/^[-•·▶+?]\s*/, '').replace(/^질문\s*[:：]?\s*/i, '').trim();
 }
 
-const NOISE_RE = /(?:기억(?:은|이)?\s*안|기억(?:나지|이\s*나지)|잘\s*기억|고사실|대기실|입실|착석|퇴실|면접관|진행방식|후기|분위기|팁|꿀팁|생략|^\(?꼬리|모르겠|질문\s*없음|자소서|자기\s*소개서|생기부\s*질문|생기부\s*관련|교과\s*질문|전공\s*질문|답변\s*못함|말씀을 들어보니|기억(?:이|은)?\s*나나요|기억나나요|기억\s*나시나요|바운\s*지|바운\s*거|답변\s*☞|논리적\s*사고력\s*[-–]|오는\s*길|코로나|학급\s*신문|\[질문\d*\]|면접\s*준비\s*TIP|여쑤어|득히|부산대학교∙\d+|특수목적대학)/i;
+const NOISE_RE = /(?:기억(?:은|이)?\s*안|기억(?:나지|이\s*나지)|잘\s*기억|고사실|대기실|입실|착석|퇴실|면접관|진행방식|후기|분위기|팁|꿀팁|생략|^\(?꼬리|모르겠|질문\s*없음|자소서|자기\s*소개서|생기부\s*질문|생기부\s*관련|교과\s*질문|전공\s*질문|답변\s*못함|말씀을 들어보니|기억(?:이|은)?\s*나나요|기억나나요|기억\s*나시나요|바운\s*지|바운\s*거|답변\s*☞|논리적\s*사고력\s*[-–]|오는\s*길|코로나|학급\s*신문|\[질문\d*\]|면접\s*준비\s*TIP|여쑤어|득히|부산대학교∙\d+|특수목적대학|기본소양[ⅠⅡI0-9_]*|보조질문\d*|한중\s*문화갈등|조사를\s*했는데|질문\s*및\s*을|국제\s*답변\s*사회|답변\s+[가-힣]+의)/i;
 const QUESTION_CHECK_RE = /(?:\?|인가요|무엇인가요|어떤가요|설명해\s*(?:보세요|주세요|바랍니다|볼래요)|말해\s*(?:보세요|주세요|봐요)|있나요|했나요|있었나요|했었나요|되었나요|있는지|했는지|어떻게|이유는|이유가|까\?|요\?|나\?|은\?|는\?|어떤|무엇|왜)/;
 const SYMBOL_PLACEHOLDER_RE = /[■●◆▶▷◀◁□○◎★☆※•∙]|학생부종합|학생부교과|OO|○○|〇〇|00|XX|××|□□|___/;
 const CONTEXT_DEPENDENT_START_RE = /^(?:뭐 하는|어떤 기업|그|그때|이때|이전|관찰 이전|그럼|그러면|그렇다면|아까|방금|혹시 그|왜 그렇게|그래서|근데|그런데|어떤 물질)\b/;
-const BAD_START_RE = /^(?:이루어져|그러[며면한]|구성원이 |A의 |B의 |\(|그리고\s*사실|하지만\s*|따라서\s*|그에\s*따라|이에\s*따라|한편\s*|그런\s*이유로)/;
+const BAD_START_RE = /^(?:이루어져|그러[며면한]|구성원이 |A의 |B의 |\(|그리고\s*사실|하지만\s*|따라서\s*|그에\s*따라|이에\s*따라|한편\s*|그런\s*이유로|이\s*프로젝트에서)/;
 const BAD_PAST_TERMS_RE = /(?:생기부\s*보니까|생기부에\s*나와있|나와있는데|평가되어|성적이|캠퍼스|선도부|급식지도|수소\s*연료전지|전기차|순자\s*말고|과외\s*관련|객체\s*지향|공확|팀구|3화년|인상\s*깊은더|역할객체|지의류|농구|AI수리학)/;
 const VALID_QUESTION_END_RE = /(?:\?|인가요|무엇인가요|어떤가요|설명해\s*(?:보세요|주세요|바랍니다|볼래요)|말해\s*(?:보세요|주세요|봐요)|있나요|했나요|있었나요|했었나요|되었나요|있는지\s*(?:말씀|설명)|했는지\s*(?:말씀|설명)|어떤\s*(?:점|이유)|무엇이었나요|이유는\s*무엇인가요)\s*$/;
 const BROKEN_TEXT_RE = /[가-힣],[가-힣]{6,}|인공지는/;
@@ -2046,7 +2197,10 @@ export function isCleanQuestion(qStr: string, recTxt: string, validKeywords: str
   if (/(?:러시아|우크라이나|국제분쟁|외교관)/.test(qStr) && !/정치|외교|국제|사회/.test(targetMajor)) {
     return false;
   }
-  if (/(?:자율주행)/.test(qStr) && !/자동차|기계|모빌리티|컴퓨터|전자|전기|AI|인공지능/.test(targetMajor)) {
+  if (/(?:소프트웨어\/AI|알고리즘\s*대회)/.test(qStr) && !/(?:컴퓨터|소프트웨어|SW|AI|인공지능|데이터|정보기술|정보통신|전산)/.test(targetMajor)) {
+    return false;
+  }
+  if (/(?:자율\s*주행)/.test(qStr) && !/(?:자동차|기계|모빌리티|컴퓨터|전자|전기|AI|인공지능|로봇)/.test(targetMajor)) {
     return false;
   }
 
@@ -2433,6 +2587,19 @@ export function buildRuleCandidatePool(
         if (/스트레스|반응|변화|적응|조화|순환/.test(kw)) return;
       }
 
+      // [마감 1] 체육/스포츠 vs 화학/생명 간 '호흡' 연계 금지
+      const isS1Pe = /(?:체육|스포츠|운동|건강)/.test(s1Subj);
+      const isS2Pe = /(?:체육|스포츠|운동|건강)/.test(s2Subj);
+      if ((isS1Pe && isS2Sci) || (isS2Pe && isS1Sci)) {
+        if (/호흡|스트레스|운동|체력|반응/.test(kw)) return;
+      }
+      // [마감 1] 역사 과목(삼국간섭 등)에서 '간섭' 연계 금지
+      const isS1Hist = /(?:역사|한국사|동아시아사|세계사)/.test(s1Subj);
+      const isS2Hist = /(?:역사|한국사|동아시아사|세계사)/.test(s2Subj);
+      if (isS1Hist || isS2Hist || /삼국\s*간섭/.test(s1.text) || /삼국\s*간섭/.test(s2.text)) {
+        if (/간섭/.test(kw)) return;
+      }
+
       if (s1.grade > s2.grade) {
         const tmp = s1;
         s1 = s2;
@@ -2509,6 +2676,7 @@ export function buildRuleCandidatePool(
 
   const allTails = [...univTails, ...fallbackTails];
 
+  let purePCount = 0;
   allTails.forEach((tObj, tIdx) => {
     let b: 'A' | 'C' | 'P' = tObj.b || 'A';
     if (!tObj.b) {
@@ -2517,37 +2685,45 @@ export function buildRuleCandidatePool(
     }
 
     const candidates = sents.filter((s) => {
-      if (b === 'P') return s.sec === '행특' || (s.f && (s.f.leader || s.f.coop || s.f.care || s.f.conflict || s.f.plan)) || s.area === '봉사활동';
+      if (b === 'P') return Boolean(s.f && (s.f.leader || s.f.coop || s.f.care || s.f.conflict));
       if (b === 'C') return s.rel || s.area === '진로활동' || (s.f && s.f.read);
       return s.f && (s.f.experiment || s.f.inquiry || s.f.make || s.concepts.length > 0);
     });
 
-    let matchSent: SentenceItem | null = candidates.length > 0 ? candidates[tIdx % candidates.length] : null;
-    if (!matchSent && b === 'P') {
-      matchSent = sents.find((s) => s.sec === '행특' || (s.f && (s.f.leader || s.f.coop || s.f.care || s.f.conflict || s.f.plan))) || null;
+    let matchSent: SentenceItem | null = null;
+    if (b === 'P') {
+      if (candidates.length > 0) {
+        matchSent = candidates[tIdx % candidates.length];
+      }
+    } else {
+      matchSent = candidates.length > 0 ? candidates[tIdx % candidates.length] : sents[tIdx % sents.length];
     }
+
     if (!matchSent && b === 'P') {
-      // 순수 공동체/인성 보편 질문 (이과 과학 개념 문장 오결합 원천 차단)
-      pool.push(
-        Q({
-          b: 'P',
-          k: `ufus_pure_p_${tIdx}`,
-          p: 3.2,
-          type: '화법융합',
-          tplId: `fusion_univ_p_${tIdx % 10}`,
-          src: '융합',
-          srcBadge: fusionBadge,
-          catGroup: 'fusion',
-          text: `고교 생활 중 다양한 사람들과 협력하거나 갈등을 조율했던 경험을 바탕으로, ${tObj.tail}`,
-          ans: '공동체 내에서 겪은 실제 소통 및 협업 경험을 구체적 사례와 함께 답변하세요.',
-          ansLabel: '모범 답변 가이드',
-          tip: '대학 입학사정관의 공식 질문 화법과 학생의 공동체 인성을 평가하는 문항입니다.',
-          tails: ['그 과정에서 본인이 양보하거나 배려한 부분은 무엇이었나요?']
-        })
-      );
+      // 순수 공동체/인성 보편 질문 (이과 과학 개념 문장 오결합 원천 차단, 최대 1개만 생성)
+      if (purePCount < 1) {
+        purePCount++;
+        pool.push(
+          Q({
+            b: 'P',
+            k: `ufus_pure_p_${tIdx}`,
+            p: 3.2,
+            type: '화법융합',
+            tplId: `fusion_univ_p_${tIdx % 10}`,
+            src: '융합',
+            srcBadge: fusionBadge,
+            catGroup: 'fusion',
+            text: `고교 생활 중 다양한 사람들과 협력하거나 갈등을 조율했던 경험을 바탕으로, ${tObj.tail}`,
+            ans: '공동체 내에서 겪은 실제 소통 및 협업 경험을 구체적 사례와 함께 답변하세요.',
+            ansLabel: '모범 답변 가이드',
+            tip: '대학 입학사정관의 공식 질문 화법과 학생의 공동체 인성을 평가하는 문항입니다.',
+            tails: ['그 과정에서 본인이 양보하거나 배려한 부분은 무엇이었나요?']
+          })
+        );
+      }
       return;
     }
-    if (!matchSent) matchSent = sents[tIdx % sents.length];
+    if (!matchSent && b !== 'P') matchSent = sents[tIdx % sents.length];
 
     if (matchSent) {
       const topicQ = matchSent.quotes.find((q) => !q.book && isValidInquiryTopic(q.q));
@@ -3038,7 +3214,12 @@ export function generateAdditionalRuleQuestions(
     profile.customKeywords
   );
 
-  const existingTexts = new Set(existingQuestions.map((q) => q.question.trim()));
+  const normKey = (str: string) => stripHtmlTags(str).replace(/[‘'“"”’]/g, '').replace(/\s+/g, ' ').trim();
+  const existingTexts = new Set<string>();
+  existingQuestions.forEach((q) => {
+    existingTexts.add(normKey(q.question));
+    existingTexts.add(q.question.trim());
+  });
   const globalTplCnt = new Map<string, number>();
   const globalRecCnt = new Map<string, number>();
 
@@ -3068,7 +3249,8 @@ export function generateAdditionalRuleQuestions(
       continue;
     }
     const qTextTrimmed = cand.text.trim();
-    if (existingTexts.has(qTextTrimmed)) continue;
+    const qNorm = normKey(cand.text);
+    if (existingTexts.has(qTextTrimmed) || existingTexts.has(qNorm)) continue;
 
     // 추가 생성 질문은 기출 DB 출제 완전 0건 (100% 내 학생부 + 룰 템플릿으로만 생성)
     if (
@@ -3108,6 +3290,7 @@ export function generateAdditionalRuleQuestions(
     }
 
     existingTexts.add(qTextTrimmed);
+    existingTexts.add(qNorm);
     additions.push({
       id: `q-add-${cand.b.toLowerCase()}-${additions.length + 1}-${Date.now()}`,
       competency: candComp,
@@ -3130,7 +3313,7 @@ export function generateAdditionalRuleQuestions(
     });
   }
 
-  // 문항 풀 고갈 시 각 역량별 순수 보편 질문으로 정확한 count 보충
+  // 문항 풀 고갈 시 각 역량별 미사용 순수 보편 질문으로 중복 없이 보충
   if (additions.length < count) {
     const universalFallbacks: Record<CompetencyType, string[]> = {
       academic: [
@@ -3196,36 +3379,50 @@ export function generateAdditionalRuleQuestions(
         '우리 학과에 입학한 후 10년 뒤 어떤 전문가로 성장해 대학의 명예를 빛내고 싶은지 포부를 말씀해 주세요.'
       ]
     };
+
     const compOrder: CompetencyType[] = targetCompetency && targetCompetency !== 'all' ? [targetCompetency] : ['academic', 'career', 'community'];
-    let cIdx = 0;
-    while (additions.length < count) {
-      const comp = compOrder[cIdx % compOrder.length];
-      const uList = universalFallbacks[comp];
-      const text = uList[Math.floor(cIdx / compOrder.length) % uList.length];
-      if (!existingTexts.has(text)) {
-        existingTexts.add(text);
-        additions.push({
-          id: `q-add-fallback-${additions.length + 1}-${Date.now()}`,
-          competency: comp,
-          type: 'record',
-          question: text,
-          intent: comp === 'community'
-            ? '공동체 내 협업·소통·배려·책임감을 평가하는 보편 심층 문항입니다.'
-            : comp === 'academic'
-            ? '학업적 지적 호기심과 자기주도적 탐구 역량을 평가하는 보편 심층 문항입니다.'
-            : comp === 'career'
-            ? '전공에 대한 관심과 진로 개척 의지를 평가하는 보편 심층 문항입니다.'
-            : '대학 및 지원 전공에 대한 지원 동기와 포부를 평가하는 보편 심층 문항입니다.',
-          points: ['자신의 경험을 바탕으로 진솔하고 구체적인 사례를 들어 답변하세요.'],
-          followUps: ['이 경험을 통해 스스로 배운 점은 무엇인가요?'],
-          srcBadge: '[보편 심층소양]',
-          catGroup: 'common',
-          completed: false,
-          starred: false
-        });
+    
+    // 남은 미사용 보편 질문만 수집 (이미 출제된 질문은 단 1건도 포함하지 않음)
+    const availableFallbacks: Array<{ comp: CompetencyType; text: string }> = [];
+    const maxLen = Math.max(...compOrder.map((c) => (universalFallbacks[c] || []).length));
+    for (let i = 0; i < maxLen; i++) {
+      for (const comp of compOrder) {
+        const uList = universalFallbacks[comp] || [];
+        if (i < uList.length) {
+          const text = uList[i];
+          const nText = normKey(text);
+          if (!existingTexts.has(nText) && !existingTexts.has(text.trim())) {
+            availableFallbacks.push({ comp, text });
+          }
+        }
       }
-      cIdx++;
-      if (cIdx > 300) break;
+    }
+
+    for (const item of availableFallbacks) {
+      if (additions.length >= count) break;
+      const nText = normKey(item.text);
+      if (existingTexts.has(nText) || existingTexts.has(item.text.trim())) continue;
+      existingTexts.add(nText);
+      existingTexts.add(item.text.trim());
+      additions.push({
+        id: `q-add-fallback-${additions.length + 1}-${Date.now()}`,
+        competency: item.comp,
+        type: 'record',
+        question: item.text,
+        intent: item.comp === 'community'
+          ? '공동체 내 협업·소통·배려·책임감을 평가하는 보편 심층 문항입니다.'
+          : item.comp === 'academic'
+          ? '학업적 지적 호기심과 자기주도적 탐구 역량을 평가하는 보편 심층 문항입니다.'
+          : item.comp === 'career'
+          ? '전공에 대한 관심과 진로 개척 의지를 평가하는 보편 심층 문항입니다.'
+          : '대학 및 지원 전공에 대한 지원 동기와 포부를 평가하는 보편 심층 문항입니다.',
+        points: ['자신의 경험을 바탕으로 진솔하고 구체적인 사례를 들어 답변하세요.'],
+        followUps: ['이 경험을 통해 스스로 배운 점은 무엇인가요?'],
+        srcBadge: '[보편 심층소양]',
+        catGroup: 'common',
+        completed: false,
+        starred: false
+      });
     }
   }
 

@@ -15,7 +15,16 @@ import {
   Star,
 } from 'lucide-react';
 
-const cleanOriginalText = (s?: string) => (s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim() : '');
+const cleanOriginalText = (s?: string) => {
+  if (!s) return '';
+  return s
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+};
 const cleanSubjectBadge = (s?: string) => (s ? s.replace(/\[\s*\d+\s*시간\s*\]/g, '').replace(/\[[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim() : '');
 
 interface QuestionListProps {
