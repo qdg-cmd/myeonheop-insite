@@ -1023,7 +1023,7 @@ export function analyze(s: SentenceItem, ctx: { major: string; majorKw: string[]
   if (f.conflict) {
     const isFalseConflict = /(?:민원\s*갈등|갈등\s*장면(?:\s*사례\s*분석)?|교실\s*갈등.*활동(?:을|\s*설계)|드라마.*갈등\s*장면|조절\s*T세포.*조율|호흡과\s*보폭을\s*조율|이해관계자.*조율.*방법을\s*탐구|도덕적\s*갈등|인물\s*간\s*갈등|민족\s*갈등|사회적\s*갈등|신분.*갈등)/.test(t);
     const hasRealConflict = /(?:의견\s*차이|갈등을\s*(?:조율|중재|해결)|입장\s*차이|갈등\s*상황)/.test(t) && /(?:급우|동료|친구|팀원|모둠원|부원|구성원|학급)/.test(t);
-    if (isFalseConflict || !hasRealConflict) {
+    if (isFalseConflict || !hasRealConflict || /(?:소감을\s*작성|활동을\s*설계|가사를\s*찾아|견해를\s*논리적으로\s*서술|심화\s*탐구를\s*진행)/.test(t)) {
       f.conflict = false;
     }
   }
@@ -1032,8 +1032,15 @@ export function analyze(s: SentenceItem, ctx: { major: string; majorKw: string[]
   if (f.coop) {
     const isFalseCoop = /(?:함께\s*모여|함께라면|함께\s*고찰|함께\s*배양|방식과\s*함께|사회\s*구성원|좌우명|국제적(?:인)?\s*협력|국제\s*협력|국가\s*간\s*협력)/.test(t);
     const hasRealCoop = /(?:모둠원|팀원|조원|친구들|동료|급우|부원).*(?:협업|협동|협력|도와주며|역할\s*분담|함께\s*해결)/.test(t);
-    if (isFalseCoop || !hasRealCoop) {
+    if (isFalseCoop || !hasRealCoop || /(?:소감을\s*작성|활동을\s*설계|가사를\s*찾아|견해를\s*논리적으로\s*서술|심화\s*탐구를\s*진행)/.test(t)) {
       f.coop = false;
+    }
+  }
+
+  // 문맥 가드 5-1: 배려/봉사(care) - 단순 감상/어휘 학습/비공동체 활동 배제
+  if (f.care) {
+    if (/(?:소감을\s*작성|활동을\s*설계|가사를\s*찾아|견해를\s*논리적으로\s*서술|심화\s*탐구를\s*진행)/.test(t)) {
+      f.care = false;
     }
   }
 
@@ -1158,18 +1165,35 @@ const IRREGULAR_M_PAST: Record<string, string> = {
 
 export function balanceQuotes(str: string): string {
   if (!str) return str;
-  let s = str;
-  // 홀수 개의 작은따옴표 체크
-  const singleQuotes = s.match(/['‘'’]/g) || [];
-  if (singleQuotes.length % 2 !== 0) {
-    const firstQuoteIdx = s.search(/['‘'’]/);
-    if (firstQuoteIdx > 0) {
-      s = "'" + s;
-    } else {
-      s = s + "'";
+  let s = str.trim();
+  // 홀수 개의 작은따옴표 체크 및 앞머리 외톨이 여는 따옴표 즉시 제거
+  if (/^['‘]/.test(s)) {
+    const qCount = (s.match(/['‘'’]/g) || []).length;
+    if (qCount % 2 !== 0) {
+      s = s.replace(/^['‘]\s*/, '').trim();
     }
   }
+  const singleQuotes = s.match(/['‘'’]/g) || [];
+  if (singleQuotes.length % 2 !== 0) {
+    s = s + "'";
+  }
   return s;
+}
+
+export function cleanClauseQuotes(str: string | null): string | null {
+  if (!str) return str;
+  let s = str.trim();
+  if (/^['‘]/.test(s)) {
+    if (/^['‘][^'‘’]+['’]$/.test(s)) {
+      s = s.slice(1, -1).trim();
+    } else {
+      const qCount = (s.match(/['‘'’]/g) || []).length;
+      if (qCount % 2 !== 0 || !/[''’]/.test(s.slice(1))) {
+        s = s.replace(/^['‘]\s*/, '').trim();
+      }
+    }
+  }
+  return balanceQuotes(s);
 }
 
 export function isValidInquiryTopic(q: string): boolean {
@@ -1202,7 +1226,13 @@ export function isValidInquiryTopic(q: string): boolean {
   if (/(?:…|\.{2,}|~|첫차|새벽\s*첫차|진정한\s*부자|에\s*대해서|에\s*대하여|에\s*관해서|을\s*위하여|사람이다|아니다|사람이\s*아니라|일이\s*없는\s*사람|것이다|때문이다)$/.test(t)) {
     return false;
   }
-  if (/(?:새로운\s*과학적\s*기술|생명력\s*충만|삶에\s*대한\s*지향)/.test(t)) {
+  if (/(?:새로운\s*과학적\s*기술|생명력\s*충만|삶에\s*대한\s*지향|아니라\s+.*사람|책의\s*문구에\s*공감|박수\s*하다)/.test(t)) {
+    return false;
+  }
+  if (/에\s*대한\s*(?:지향|동경|갈등)$/.test(t)) {
+    return false;
+  }
+  if (/^[가-힣]{2,4}하다$/.test(t)) {
     return false;
   }
   // 5. 비학술적 서술어 파편/동사어간 차단 (예: '칭얼거리다', '나누며', '주어진', '모둠원', '학교생활')
@@ -1321,7 +1351,7 @@ export function clauseFor(s: SentenceItem, anchor?: string | null): string | nul
 
   if (t.length <= 95) {
     const c = toPastClause(t);
-    if (c) return balanceQuotes(c);
+    if (c) return cleanClauseQuotes(c);
   }
 
   // 인용부호('...', "...") 범위를 보호하며 절단 분리
@@ -1368,21 +1398,21 @@ export function clauseFor(s: SentenceItem, anchor?: string | null): string | nul
   const singleQuotesCount = (seg.match(/['‘]/g) || []).length;
   const doubleQuotesCount = (seg.match(/["“]/g) || []).length;
   if (singleQuotesCount % 2 !== 0 || doubleQuotesCount % 2 !== 0) {
-    return toPastClause(t);
+    return cleanClauseQuotes(toPastClause(t));
   }
 
   // 앞머리 불완전 접속사/연결어 정돈 및 찌꺼기 절단(있던, 접하는, 요소 간의, 시간 탐구 등) 감지 시 전체 문장 복원
   seg = seg.replace(LEAD_RE, '');
   if (/^(?:[…,]|\s*(?:있으며|없으며|통해|위해|대해|기른|보인|높인|갖춘|펼친|이끈|이룬|담은|담아|거쳐|해석하였으\s*며|산출하는\s*과정|에는|기억함으로|있던|접하는|요소\s*간의|시간\s*탐구))/i.test(seg) || seg.length < 18) {
-    return toPastClause(t);
+    return cleanClauseQuotes(toPastClause(t));
   }
   seg = seg.replace(/^(?:있으며|없으며|통해|위해|대해|기른|보인|높인|갖춘|펼친|이끈|이룬|담은|담아|거쳐|통하여|위하여|대하여|바탕으로|에는|교사|과학|에서)\s+/g, '');
   if (seg.length < 18) {
-    return toPastClause(t);
+    return cleanClauseQuotes(toPastClause(t));
   }
 
   const res = toPastClause(seg);
-  return balanceQuotes(res || toPastClause(t) || seg);
+  return cleanClauseQuotes(res || toPastClause(t) || seg);
 }
 
 export function recordLabel(s: SentenceItem): string {
@@ -1401,9 +1431,9 @@ export function lead(s: SentenceItem, anchor?: string | null, variantIdx?: numbe
   const label = recordLabel(s);
   let v = typeof variantIdx === 'number' ? variantIdx % 4 : ((s.pi || 0) + (typeof s.rid === 'number' ? s.rid : 0)) % 4;
   if (c) {
-    const balancedC = balanceQuotes(c);
-    // [마감 4] 리드문 끝이 '인상적이었다'로 끝날 때 4번 화법(~는 점이 인상적인데,) 대신 0번 화법 선택
-    if (/인상적(?:이었|었|다)/.test(balancedC) && v === 3) {
+    const balancedC = cleanClauseQuotes(c) || balanceQuotes(c);
+    // [마감 4 & 최종 정밀] 리드문 내부에 '인상적' 단어가 포함되어 있을 때 4번 화법(~는 점이 인상적인데,) 대신 0번 화법 선택
+    if (/인상적/.test(balancedC) && v === 3) {
       v = 0;
     }
     if (v === 1) return balanceQuotes(`${label} 기록을 보면 ${balancedC.replace(/고$/, '는')} 내용이 눈에 띕니다.`);
@@ -1417,6 +1447,9 @@ export function lead(s: SentenceItem, anchor?: string | null, variantIdx?: numbe
   if (single.length > 75) t = single.slice(0, 72) + '…';
   else t = single;
   const balancedT = balanceQuotes(t);
+  if (/인상적/.test(balancedT) && v === 3) {
+    v = 0;
+  }
   if (v === 1) return balanceQuotes(`${label} 기록을 보면 ‘${balancedT}’라는 내용이 눈에 띕니다.`);
   if (v === 2) return balanceQuotes(`${label} 활동에서 ‘${balancedT}’라고 기재되어 있는데,`);
   if (v === 3) return balanceQuotes(`${label} 관련하여 ‘${balancedT}’라는 점이 인상적인데,`);
@@ -2111,7 +2144,7 @@ export function isMajorCompatible(dept: string, targetMajor: string, flds: any[]
   const isFreeMajor = /자[유율]전공|무전공/.test(targetMajor);
   if (isFreeMajor) {
     // 자유전공/무전공 지원 시 자연과학/공학/어문 특정 기출 질문 및 특정 학과 차단
-    if (qText && /(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서)/.test(qText)) {
+    if (qText && /(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달)/.test(qText)) {
       return false;
     }
     if (dept && /(?:공학|이과|자연|생명|화학|물리|의예|간호|약학|전자|기계|배터리|신소재|어문|국문|영문|중문|일문)/.test(dept)) {
@@ -2137,13 +2170,16 @@ export function isMajorCompatible(dept: string, targetMajor: string, flds: any[]
 export function stripQPrefix(str: string): string {
   let s = (str || '').trim();
   s = s.replace(/^\[[^\]]+\]\s*/, '').trim();
+  s = s.replace(/^(?:전공|인성|공통|기초|심화)\s*[-–—:：]\s*/, '').trim();
   const PREFIX_RE = /^\s*(?:(?:\d+(?:-\(?\d+\)?|\.\d+)?|Q\d*)\s*[.):?!+\-]|(?:\(\d+\)|\[\d+\]|[①-⑮]))\s*/i;
   while (PREFIX_RE.test(s)) {
     const next = s.replace(PREFIX_RE, '').trim();
     if (next === s || next.length === 0) break;
     s = next;
   }
-  return s.replace(/^[-•·▶+?]\s*/, '').replace(/^질문\s*[:：]?\s*/i, '').trim();
+  s = s.replace(/^[-•·▶+?]\s*/, '').replace(/^질문\s*[:：]?\s*/i, '').trim();
+  s = s.replace(/^(?:전공|인성|공통|기초|심화)\s*[-–—:：]\s*/, '').trim();
+  return s;
 }
 
 const NOISE_RE = /(?:기억(?:은|이)?\s*안|기억(?:나지|이\s*나지)|잘\s*기억|고사실|대기실|입실|착석|퇴실|면접관|진행방식|후기|분위기|팁|꿀팁|생략|^\(?꼬리|모르겠|질문\s*없음|자소서|자기\s*소개서|생기부\s*질문|생기부\s*관련|교과\s*질문|전공\s*질문|답변\s*못함|말씀을 들어보니|기억(?:이|은)?\s*나나요|기억나나요|기억\s*나시나요|바운\s*지|바운\s*거|답변\s*☞|논리적\s*사고력\s*[-–]|오는\s*길|코로나|학급\s*신문|\[질문\d*\]|면접\s*준비\s*TIP|여쑤어|득히|부산대학교∙\d+|특수목적대학|기본소양[ⅠⅡI0-9_]*|보조질문\d*|한중\s*문화갈등|조사를\s*했는데|질문\s*및\s*을|국제\s*답변\s*사회|답변\s+[가-힣]+의)/i;
@@ -2151,11 +2187,11 @@ const QUESTION_CHECK_RE = /(?:\?|인가요|무엇인가요|어떤가요|설명�
 const SYMBOL_PLACEHOLDER_RE = /[■●◆▶▷◀◁□○◎★☆※•∙]|학생부종합|학생부교과|OO|○○|〇〇|00|XX|××|□□|___/;
 const CONTEXT_DEPENDENT_START_RE = /^(?:뭐 하는|어떤 기업|그|그때|이때|이전|관찰 이전|그럼|그러면|그렇다면|아까|방금|혹시 그|왜 그렇게|그래서|근데|그런데|어떤 물질)\b/;
 const BAD_START_RE = /^(?:이루어져|그러[며면한]|구성원이 |A의 |B의 |\(|그리고\s*사실|하지만\s*|따라서\s*|그에\s*따라|이에\s*따라|한편\s*|그런\s*이유로|이\s*프로젝트에서)/;
-const BAD_PAST_TERMS_RE = /(?:생기부\s*보니까|생기부에\s*나와있|나와있는데|평가되어|성적이|캠퍼스|선도부|급식지도|수소\s*연료전지|전기차|순자\s*말고|과외\s*관련|객체\s*지향|공확|팀구|3화년|인상\s*깊은더|역할객체|지의류|농구|AI수리학|진행한\s*거\s*같은데|많은\s*것\s*같은데|말씀해\s*주셨는데|목표라고\s*했으니|관심\s*많은\s*거\s*알겠|연구하셨던[가-힣]|하셨던[가-힣]|다문화\s*가정.*교육봉사|체력에\s*대해\s*말씀|국제관계\s*전문가)/;
+const BAD_PAST_TERMS_RE = /(?:생기부\s*보니까|생기부에\s*나와있|나와있는데|평가되어|성적이|캠퍼스|선도부|급식지도|수소\s*연료전지|전기차|순자\s*말고|과외\s*관련|객체\s*지향|공확|팀구|3화년|인상\s*깊은더|역할객체|지의류|농구|AI수리학|진행한\s*거\s*같은데|많은\s*것\s*같은데|말씀해\s*주셨는데|목표라고\s*했으니|관심\s*많은\s*거\s*알겠|연구하셨던[가-힣]|하셨던[가-힣]|다문화\s*가정.*교육봉사|체력에\s*대해\s*말씀|국제관계\s*전문가|한\s*것\s*같은데|한것\s*같은데|탐구\s*했는데|거기에\s*대해\s*자세히)/;
 const VALID_QUESTION_END_RE = /(?:\?|인가요|무엇인가요|어떤가요|설명해\s*(?:보세요|주세요|바랍니다|볼래요)|말해\s*(?:보세요|주세요|봐요)|있나요|했나요|있었나요|했었나요|되었나요|있는지\s*(?:말씀|설명)|했는지\s*(?:말씀|설명)|어떤\s*(?:점|이유)|무엇이었나요|이유는\s*무엇인가요)\s*$/;
 const BROKEN_TEXT_RE = /[가-힣],[가-힣]{6,}|인공지는/;
 const BROKEN_OR_DEPENDENT_RE = /(?:[①-⑮]|B가\s|은호|제시된\s*(?:기술|방안|자료|문제)|이러한\s*(?:질병|기술|문제|현상)|제기된\s*방안|이렇게\s*어려움을|그\s*지식은|그렇게\s*생각하게\s*된|^[가-힣]{1,2}\s*생겨|공통\s*\d+번|답변고등|반영\s*비율|\d{2}%)/;
-const OCR_BROKEN_RE = /(?:혁생|선골|독득|퍼이지|닌도|범랍|상성형|고촬|확습|역할은및|좋은및것|때이\s|(?<![가-힣])입하(?![가-힣])|형징|폭날게|층미|개획|경철행정|목묘|(?<![가-힣])하당(?![가-힣])|수단만으로대하는|동역사|위첩|요즘\s*시가\s*발달)/;
+const OCR_BROKEN_RE = /(?:혁생|선골|독득|퍼이지|닌도|범랍|상성형|고촬|확습|역할은및|좋은및것|때이\s|(?<![가-힣])입하(?![가-힣])|형징|폭날게|층미|개획|경철행정|목묘|(?<![가-힣])하당(?![가-힣])|수단만으로대하는|동역사|위첩|요즘\s*시가\s*발달|이유런던|역물|수및있을까요)/;
 const UNIV_NAMES_RE = /(?:서울대|연세대|고려대|성균관대|서강대|한양대|중앙대|경희대|한국외대|시립대|이화여대|건국대|동국대|홍익대|숙명여대|국민대|숭실대|세종대|단국대|아주대|인하대|부산대|경북대|전남대|충남대|충북대|전북대|강원대|제주대|가톨릭대|가천대|우송대|교원대|한국교원대|대구교대|경인교대|서울교대|공주교대|광주교대|청주교대|춘천교대|진주교대|전주교대)/;
 const DISALLOWED_PAST_ACTIVITIES_RE = /(?:수상|상을|환선굴|범람원|한국\s*지리|서계\s*지리|중학교\s*역사|기술\s*가정|파이선|통역사|고추\s*농사|도핑|방위산업|예술작품|특수학급.*지리|파리\s*주택|멘토링|또래교사|쓰여\s*있는데|내용을\s*보면|보니까)/;
 const PAST_OTHER_ACTIVITY_RE = /(?:했을\s*때|했네요|했다는데|하였는데|하셨다는데|하셨다\s*하는데|하셨다고|하셨는데|하셨나요|수행평가로|수행평가|동아리\s*시간에|수업\s*시간에|적혀\s*있|적혀있|했다고\s*(?:적혀|하는|되어|들었|하셨)|(?:연구|조사|탐구|실험|발표|제작|개발|작성|확인|정리)\s*(?:했다고|하셨다고|하셨다|했다|하였다)|알아봤다고|배웠다고|들었다고|적혔다고|적혀있다고|했던데|했더군요|하셨던데|개발하였|개발했|을\s*읽고|를\s*읽고|관찰하여|비교하고\s*정리|을\s*제작했|를\s*제작했|을\s*분석했|를\s*분석했|을\s*발표했|를\s*발표했|을\s*만들었|를\s*만들었|을\s*진행했|를\s*진행했|을\s*조사했|를\s*조사했|을\s*탐구했|를\s*탐구했|에서\s*본인이|에서\s*자신이|만들\s*때\s*어떤|활동들을\s*했던데|보고서를\s*제출한|보고서를\s*(?:작성|제출)|활동에서\s*.*조사|활동에서\s*.*실험|동아리\s*활동에서|진로활동에서|자율활동에서|봉사활동에서|[1-3]학년\s*(?:때|[가-힣]+시간)|(?:생기부|세특|개세특|학생부|자소서)에\s*(?:적힌|있는|나온|기록된))/;
@@ -2192,7 +2228,7 @@ export function isCleanQuestion(qStr: string, recTxt: string, validKeywords: str
 
   // 자유전공/무전공 지원 시 자연과학/공학 심화 기출 및 특정 어문 기출 차단
   if (/자[유율]전공|무전공/.test(targetMajor)) {
-    if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서)/.test(qStr)) {
+    if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달)/.test(qStr)) {
       return false;
     }
   }
@@ -2313,11 +2349,11 @@ export function splitCaseQs(qTxt: string, aTxt: string, recTxt: string, validKey
 
 const TAIL_SPLIT_RE = /(?:기록되어 있습니다|기록이 있습니다|기록되어 있는데|기록이 있는데|기록되었습니다|활동을 했는데|발표했다고 기록되어 있습니다|발표했다고 되어 있는데|작성했다고 기록되어 있습니다|언급해 주었는데|언급되어 있는데|있다는 내용이 있는데|제시했다는 내용이 있는데|기록이 있네요|작성했다고 하는데|탐구했다고 하는데|조사했다고 기록되어 있습니다|조사했다고 하는데|발표한 기록이 있는데|보고서를 작성했는데요|보고서에 대한 내용이 있는데|했다고 하는데요|했다고 하는데|활동을 하였네요|활동을 하였는데|활동을 하였는데,|추가탐구를 하였는데요|설명했다는 기록이 있네요|설명했다는 내용이 있네요)[.,]?\s*/;
 
-const BAD_UNIV_TAIL_RE = /(?:소설|작품|‘?OOO’?|‘?○○○’?|문화\s*변동|표본|모집단|조건부\s*확률|이항\s*분포|이항분포|정규분포|미분|적분|호흡\s*과정|에너지\s*생성|중화\s*적정|농도|로봇팔|좌표평면|전해질|전지|화학적|물리적|수학적|역사적|책에서|기술\s*발전|설명문|절대우위|비교우위|기억에\s*남는\s*질문|어떤\s*점\s*에서\s*공감|알코올\s*발효|효모|가격탄력성|아리스토텔레스|효소|지방분권화|고유값|리만|사이버폭력|가르칠\s*때|고사성어|알파계수|출결|유물|건축물|디지털\s*교과서|이\s*과정을|어떤\s*사례가|포물선|전자기\s*유도|충격량|운동량|파동|초음파|인슐린|함수|특이적\s*방어|면역|산화|환원|DNA|노화|복제|저작권|비문학|정서|헌법|샤를|보일|광전|태양전지|뉴턴|케플러|세포|아미노산|단백질|전류|전압|회로|저항|자기장|유전자|염색체|방정식|확률|통계|미적분|기하|수학|물리|화학|생명|지구과학|국어|영어|역사|지리|경제|정치|사회문화|윤리|도덕|한문|일본어|중국어|독일어|프랑스어|단원|신조어|고양이|pH|코일|문화유산|형질)/i;
+const BAD_UNIV_TAIL_RE = /(?:소설|작품|‘?OOO’?|‘?○○○’?|문화\s*변동|표본|모집단|조건부\s*확률|이항\s*분포|이항분포|정규분포|미분|적분|호흡\s*과정|에너지\s*생성|중화\s*적정|농도|로봇팔|좌표평면|전해질|전지|화학적|물리적|수학적|역사적|책에서|기술\s*발전|설명문|절대우위|비교우위|기억에\s*남는\s*질문|어떤\s*점\s*에서\s*공감|알코올\s*발효|효모|가격탄력성|아리스토텔레스|효소|지방분권화|고유값|리만|사이버폭력|가르칠\s*때|고사성어|알파계수|출결|유물|건축물|디지털\s*교과서|이\s*과정을|어떤\s*사례가|포물선|전자기\s*유도|충격량|운동량|파동|초음파|인슐린|함수|특이적\s*방어|면역|산화|환원|DNA|노화|복제|저작권|비문학|정서|헌법|샤를|보일|광전|태양전지|뉴턴|케플러|세포|아미노산|단백질|전류|전압|회로|저항|자기장|유전자|염색체|방정식|확률|통계|미적분|기하|수학|물리|화학|생명|지구과학|국어|영어|역사|지리|경제|정치|사회문화|윤리|도덕|한문|일본어|중국어|독일어|프랑스어|단원|신조어|고양이|pH|코일|문화유산|형질|실험)/i;
 
 const DEMONSTRATIVE_RE = /(?:이러한|이런|그\s*(?:책|글|인물|작품|이론|현상|작가|지식|질병|기술|문제|기획|평가|행동|과정|함수|이유|내용|방법|부분)|두\s*이론|해당\s*(?:재료|효율|신조어|역할|내용|주제)|당시\s*발표했던|위의|제시된|제기된|선정한\s*도서|그렇게\s*생각하게\s*된|작성할\s*때|그중\s*하나|이\s*문제를)/;
 
-const VALID_UNIVERSAL_TAIL_RE = /(?:어려웠던\s*점|해결\s*과정|해결했는지|극복|소통|협력|협업|핵심\s*개념|핵심\s*의미|본인의\s*말로|발전시키|연결하고\s*싶은|역량을\s*길렀|공동체를\s*위해|중요하게\s*생각|가장\s*의미\s*있었던|가설을\s*세웠고|실제\s*실험결과|어떤\s*해결방안|관심을\s*갖게\s*된\s*계기|구체적인\s*계기|구체적으로\s*설명|어떤\s*내용인지|소개해\s*보세요|설명해\s*주세요|말씀해\s*주세요|알려주세요|생각하나요|평가받았다고|어떤\s*플러스|본인의\s*관점|어떤\s*방식으로|배우고\s*느낀|인상적이었)/;
+const VALID_UNIVERSAL_TAIL_RE = /(?:어려웠던\s*점|해결\s*과정|해결했는지|극복|소통|협력|협업|핵심\s*개념|핵심\s*의미|본인의\s*말로|발전시키|연결하고\s*싶은|역량을\s*길렀|공동체를\s*위해|중요하게\s*생각|가장\s*의미\s*있었던|가설을\s*세웠고|어떤\s*해결방안|관심을\s*갖게\s*된\s*계기|구체적인\s*계기|구체적으로\s*설명|어떤\s*내용인지|소개해\s*보세요|설명해\s*주세요|말씀해\s*주세요|알려주세요|생각하나요|평가받았다고|어떤\s*플러스|본인의\s*관점|어떤\s*방식으로|배우고\s*느낀|인상적이었)/;
 
 export function extractUnivQTails(univ: string, pastData?: PastExamData | null): Array<{ cat: string; b?: 'A' | 'C' | 'P'; tail: string; orig: string; head: string }> {
   const data = pastData || getPastExamData();
@@ -2423,7 +2459,7 @@ export function qbMatch(
     const r = qb.R[i];
     if (opts.pool && (r[8] || r[4] === 3 || (r[4] === 4 && !r[2]))) continue;
     if (opts.pool && /자[유율]전공|무전공/.test(major)) {
-      if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서)/.test(r[0])) continue;
+      if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달)/.test(r[0])) continue;
       if (r[2] && /(?:공학|이과|자연|생명|화학|물리|의예|간호|약학|전자|기계|배터리|신소재|어문|국문|영문|중문|일문)/.test(r[2])) continue;
     }
     if (opts.pool && r[4] === 2 && !(med || teach) && !/협력|갈등|배려|봉사|리더|공동체|인성|윤리|도움|소통|소외|규칙|규정|정직|도덕|가치|태도/.test(r[0])) continue;
@@ -2741,10 +2777,12 @@ export function buildRuleCandidatePool(
 
     const candidates = sents.filter((s) => {
       if (b === 'P') {
-        // [핀포인트 2] P(공동체역량) 영역은 오직 행특 또는 창체의 순수 인성·협업·공동체 문장만 선별
+        // [핀포인트 2 & 최종 마감] P(공동체역량) 영역은 오직 행특 또는 창체의 순수 인성·협업·공동체 문장만 선별
         if (s.f && (s.f.experiment || s.f.make_hw || s.f.make_sw)) return false;
         if (s.concepts && s.concepts.some((c) => c.isBuiltin)) return false;
-        if (/(?:전자기\s*유도|적조|캐시\s*메모리|엽록소|시금치|다행시|문법|조계지|미적분|화학|물리|생명|지구과학)/.test(s.text)) return false;
+        if (/(?:전자기\s*유도|적조|캐시\s*메모리|엽록소|시금치|다행시|문법|조계지|미적분|화학|물리|생명|지구과학|해파)/.test(s.text)) return false;
+        if (/(?:소감을\s*작성|활동을\s*설계|가사를\s*찾아|견해를\s*논리적으로\s*서술|심화\s*탐구를\s*진행)/.test(s.text)) return false;
+        if (/(?:지구과학|물리|화학|생명과학|수학|미적분|기하|정보|프로그래밍)/.test(s.subj || '')) return false;
         return Boolean(s.sec === '행특' || (s.f && (s.f.leader || s.f.care || s.f.conflict || (s.f.coop && s.sec === '창체'))));
       }
       if (b === 'C') return s.rel || s.area === '진로활동' || (s.f && s.f.read);
@@ -2864,20 +2902,21 @@ export function buildRuleCandidatePool(
     for (const x of qm) {
       const r = x.r;
       if (r[8]) continue;
-      if (!isCleanQuestion(r[0], recTxt, validKeywords, M, U)) continue;
-      if (!isMajorCompatible(r[2], M, flds, r[0])) continue;
+      const cleanQ = stripQPrefix(r[0]);
+      if (!isCleanQuestion(cleanQ, recTxt, validKeywords, M, U)) continue;
+      if (!isMajorCompatible(r[2], M, flds, cleanQ)) continue;
 
       if (!hasUniv) {
         // 대학 미입력 시 특정 대학/캠퍼스/지역 언급 질문 100% 배제
-        if (/(?:경희대|서울대|연세대|고려대|성균관대|서강대|한양대|중앙대|이화여대|한국외대|건국대|동국대|홍익대|숙명여대|국민대|숭실대|세종대|단국대|가톨릭대|아주대|인하대|경북대|부산대|전남대|전북대|충남대|충북대|강원대|제주대|건양대|인천대|계명대|대구교대|서울교대|경인교대|본교|캠퍼스)/.test(r[0])) {
+        if (/(?:경희대|서울대|연세대|고려대|성균관대|서강대|한양대|중앙대|이화여대|한국외대|건국대|동국대|홍익대|숙명여대|국민대|숭실대|세종대|단국대|가톨릭대|아주대|인하대|경북대|부산대|전남대|전북대|충남대|충북대|강원대|제주대|건양대|인천대|계명대|대구교대|서울교대|경인교대|본교|캠퍼스)/.test(cleanQ)) {
           continue;
         }
       }
 
-      const nk = r[0].replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 22);
+      const nk = cleanQ.replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 22);
       if (seenQ.has(nk)) continue;
 
-      const isComm = r[4] === 2 || classifyText(r[0]) === 'P';
+      const isComm = r[4] === 2 || classifyText(cleanQ) === 'P';
       if (isComm) {
         const maxComm = hasUniv ? 30 : 8;
         if (nComm >= maxComm) continue;
@@ -2893,7 +2932,7 @@ export function buildRuleCandidatePool(
       const uStr = ((pastData?.QB?.U && pastData.QB.U[r[1]]) || univShort).replace(/대학교$/, '대');
       const yearStr = r[6] ? `${r[6]} ` : '';
 
-      const hasKwHit = validKeywords.some((kw) => hasTerm(r[0], kw));
+      const hasKwHit = validKeywords.some((kw) => hasTerm(cleanQ, kw));
       const catGroup = 'past';
       let srcBadge = hasKwHit ? `[${uStr} 기출융합]` : `[${yearStr}${uStr} 실제기출]`;
       if (!hasUniv) {
@@ -2902,11 +2941,11 @@ export function buildRuleCandidatePool(
       const priority = 2.4 + (hasKwHit ? 3.5 : 0) + (hasUniv && r[1] === (pastData?.QB?.U ? pastData.QB.U.indexOf(U) : -1) ? 3.0 : 0) + (r[6] >= 2025 ? 0.8 : 0);
 
       const rawAns = cleanPastAnswer(r[7] || null);
-      const ansValid = rawAns && isValidAnswerMatch(r[0], rawAns);
+      const ansValid = rawAns && isValidAnswerMatch(cleanQ, rawAns);
 
       pool.push(
         Q({
-          b: mmi ? 'P' : (classifyText(r[0]) as any),
+          b: mmi ? 'P' : (classifyText(cleanQ) as any),
           k: `qb_${x.i}`,
           p: priority,
           type: mmi ? '인적성·MMI' : '대학기출',
@@ -2914,7 +2953,7 @@ export function buildRuleCandidatePool(
           src: '실제기출',
           srcBadge,
           catGroup,
-          text: cleanKoreanSpacing(stripHtmlTags(r[0])),
+          text: cleanKoreanSpacing(stripHtmlTags(cleanQ)),
           ans: ansValid ? rawAns : null,
           ansLabel: ansValid ? '실제 합격생 답변 사례' : '모범 답변 가이드',
           tip: hasKwHit ? '내 학생부 탐구 주제와 직접 연결되는 실제 대학 기출입니다.' : '실제 대학 기출 문항입니다.',
