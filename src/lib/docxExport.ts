@@ -205,13 +205,19 @@ export function generateDocxBlob(profile: StudentProfile, starredOnly: boolean =
     const typeLabel =
       q.type === 'deep' ? '심화 연계' : q.type === 'pressure' ? '약점 방어·압박' : '기록 진위 확인';
 
+    const cleanSubj = (q.subject || '')
+      .replace(/\[\s*\d+\s*시간\s*\]/g, '')
+      .replace(/\[[^\]]*\]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
     // 문항 머리말
     paras.push({
       style: 'Heading1',
       runs: [
         ...(q.starred ? [{ t: '★ [핵심] ', b: true, sz: 26, color: 'D97706' }] : []),
         { t: `문항 ${idx + 1}. `, b: true, sz: 26, color: '1E40AF' },
-        { t: `[${q.grade ? `${q.grade} ` : ''}${q.subject || '공통'}] `, b: true, sz: 24, color: '374151' },
+        { t: `[${q.grade ? `${q.grade} ` : ''}${cleanSubj || '공통'}] `, b: true, sz: 24, color: '374151' },
         { t: `${compLabel} · ${typeLabel}${q.srcBadge ? ` · ${q.srcBadge.replace(/^\[+|\]+$/g, '')}` : ''}`, sz: 22, color: '4B5563' },
       ],
       keepNext: true,

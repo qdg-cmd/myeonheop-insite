@@ -157,7 +157,10 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
         targetUniversity: item.targetUniversity.trim(),
         targetMajor: item.targetMajor.trim(),
         interviewType,
-        records: item.records,
+        records: item.records.map((r) => ({
+          ...r,
+          text: (r.text || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s{2,}/g, ' ').trim(),
+        })),
         includeCommonQuestions,
         customKeywords: item.customKeywordsInput
           ? item.customKeywordsInput.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
@@ -172,12 +175,13 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
       }
 
       const { maskedText } = maskPersonalInfo(pastedText, pastedName || '학생A');
+      const cleanPasted = (maskedText || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s{2,}/g, ' ').trim();
       const pastedRecord: StudentRecordItem = {
         id: `rec-pasted-${Date.now()}`,
         grade: '공통',
         type: '학생부 원문',
         subject: '전체',
-        text: maskedText,
+        text: cleanPasted,
         tags: ['자기주도성', '전공적합성'],
         highlightSpans: [],
       };

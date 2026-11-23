@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 const cleanOriginalText = (s?: string) => (s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim() : '');
+const cleanSubjectBadge = (s?: string) => (s ? s.replace(/\[\s*\d+\s*시간\s*\]/g, '').replace(/\[[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim() : '');
 
 interface QuestionListProps {
   questions: QuestionItem[];
@@ -294,7 +295,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     )}
                     {q.subject && (
                       <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md whitespace-nowrap shrink-0">
-                        {q.grade ? `${q.grade} ` : ''}{q.subject}
+                        {q.grade ? `${q.grade} ` : ''}{cleanSubjectBadge(q.subject)}
                       </span>
                     )}
                   </div>

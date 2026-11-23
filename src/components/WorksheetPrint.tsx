@@ -7,6 +7,7 @@ interface WorksheetPrintProps {
 }
 
 const cleanText = (s?: string) => (s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim() : '');
+const cleanSubject = (s?: string) => (s ? s.replace(/\[\s*\d+\s*시간\s*\]/g, '').replace(/\[[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim() : '');
 
 export const WorksheetPrint: React.FC<WorksheetPrintProps> = ({ profile, starredOnly = false }) => {
   const currentDate = new Date().toLocaleDateString('ko-KR', {
@@ -85,7 +86,7 @@ export const WorksheetPrint: React.FC<WorksheetPrintProps> = ({ profile, starred
               <div className="text-xs space-x-1.5 flex items-center">
                 {q.subject && (
                   <span className="font-semibold text-gray-700 bg-gray-100 px-2 py-0.5 rounded border border-gray-300">
-                    {q.grade ? `${q.grade} ` : ''}{q.subject}
+                    {q.grade ? `${q.grade} ` : ''}{cleanSubject(q.subject)}
                   </span>
                 )}
                 <span className="border border-gray-400 px-2 py-0.5 rounded text-[11px] font-bold bg-gray-50">

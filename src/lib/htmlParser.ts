@@ -92,7 +92,8 @@ export function parseCustomStudentRecordHtml(htmlContent: string): {
 
       tagEls.forEach(span => {
         if (span.classList.contains('highlight')) {
-          highlightSpans.push(span.textContent?.trim() || '');
+          const spText = (span.textContent || '').replace(/<[^>]+>/g, '').trim();
+          if (spText) highlightSpans.push(spText);
         } else if (!span.textContent?.includes('핵심 역량') && span.textContent?.trim()) {
           tags.push(span.textContent.trim());
         }
@@ -103,7 +104,7 @@ export function parseCustomStudentRecordHtml(htmlContent: string): {
         grade,
         type,
         subject,
-        text: (textCell.textContent || '').trim(),
+        text: (textCell.textContent || '').replace(/<[^>]+>/g, '').trim(),
         tags,
         highlightSpans,
       });

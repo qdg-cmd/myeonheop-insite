@@ -523,7 +523,7 @@ function parseBehaviorSection(text: string, records: StudentRecordItem[]) {
  * 비표준 양식 대비 유연한 폴백 분할
  */
 function fallbackChunking(text: string, records: StudentRecordItem[]) {
-  const sentences = text.split(/(?<=[.?!])\s+/).filter((s) => s.trim().length > 30);
+  const sentences = text.split(/(?<=(?<!\d)[.?!])\s+/).filter((s) => s.trim().length > 30);
   const chunkSize = Math.max(2, Math.floor(sentences.length / 12));
 
   for (let i = 0; i < sentences.length; i += chunkSize) {
@@ -555,7 +555,7 @@ function autoHighlightKeySentence(text: string): {
 } {
   const cleanText = cleanKoreanSpacing((text || '').replace(/<[^>]+>/g, '').trim());
   const sentences = cleanText
-    .split(/(?<=[.?!])\s+/)
+    .split(/(?<=(?<!\d)[.?!])\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length >= 20 && s.length <= 160);
 
