@@ -2,6 +2,29 @@ import { StudentRecordItem } from '../types';
 import { cleanKoreanSpacing, cleanLabelText } from './ruleEngine';
 
 /**
+ * PDF 줄 경계 결합 보정 함수
+ * PDF 표 셀 내에서 줄바꿈 결합 시 다음 줄이 한글 조사/어미이거나 분절된 어미/명사 조각일 때 공백 없이 결합
+ */
+export function combinePdfSegments(prev: string, next: string): string {
+  const p = (prev || '').trim();
+  const n = (next || '').trim();
+  if (!p) return n;
+  if (!n) return p;
+
+  const startsWithJosaOrEnding = /^(?:을|를|이|가|은|는|의|에|와|과|로|도|만|까지|부터|에서|으로|으며|하며|하여|하고|했고|했다|한다|하는|되는|이다|였다|이며|이고|이나|에게|처럼|보다|만큼)(?![가-힣])/;
+  if (/[가-힣]$/.test(p) && startsWithJosaOrEnding.test(n)) {
+    return cleanKoreanSpacing(`${p}${n}`);
+  }
+
+  // 이전 줄 끝이 한글이고 다음 줄 시작이 1음절 어미/명사 조각인 경우
+  if (/[가-힣]$/.test(p) && /^(?:까|지|며|고|서|어|여|면|니|다|음|함|트|리|형|야|개|화|이|건|성|응|식|행|표|구|석|회|경|술|념|동|정|제|치|미|보|량|간|료|과)(?:[\s,.?!]|$)/.test(n)) {
+    return cleanKoreanSpacing(`${p}${n}`);
+  }
+
+  return cleanKoreanSpacing(`${p} ${n}`);
+}
+
+/**
  * PDF 및 텍스트 파일 파서
  */
 export async function parsePdfOrTextFile(file: File): Promise<{
@@ -321,7 +344,7 @@ function parseChangcheSection(text: string, records: StudentRecordItem[]) {
       }
       const cleanPrev = (prev.text || '').replace(/<[^>]+>/g, '').trim();
       const cleanItem = (item.text || '').replace(/<[^>]+>/g, '').trim();
-      const combinedText = `${cleanPrev} ${cleanItem}`.trim();
+      const combinedText = combinePdfSegments(cleanPrev, cleanItem);
       const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combinedText);
       prev.text = textWithHighlights;
       prev.highlightSpans = highlightSpans;
@@ -424,7 +447,7 @@ function parseSubjectSection(text: string, records: StudentRecordItem[]) {
         if (prev && prev.type === '교과학습발달') {
           const cleanPrev = (prev.text || '').replace(/<[^>]+>/g, '').trim();
           const cleanPrefix = (prefixText || '').replace(/<[^>]+>/g, '').trim();
-          const combined = `${cleanPrev} ${cleanPrefix}`.trim();
+          const combined = combinePdfSegments(cleanPrev, cleanPrefix);
           const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combined);
           prev.text = textWithHighlights;
           prev.highlightSpans = highlightSpans;
@@ -499,7 +522,7 @@ function parseBehaviorSection(text: string, records: StudentRecordItem[]) {
       if (prev && prev.grade === cur.grade && prev.type === '행동특성및종합의견') {
         const cleanPrev = (prev.text || '').replace(/<[^>]+>/g, '').trim();
         const cleanContent = (content || '').replace(/<[^>]+>/g, '').trim();
-        const combinedText = `${cleanPrev} ${cleanContent}`.trim();
+        const combinedText = combinePdfSegments(cleanPrev, cleanContent);
         const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(combinedText);
         prev.text = textWithHighlights;
         prev.highlightSpans = highlightSpans;
