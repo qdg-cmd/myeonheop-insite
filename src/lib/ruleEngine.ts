@@ -394,7 +394,7 @@ export const STOP = new Set([
   // 범용 추상명사
   '상호작용', '상관관계', '정당성', '타당성', '가능성', '중요성', '필요성', '다양성', '특성', '유형',
   '단계', '원인', '예방', '예방책', '중심', '바탕', '수준', '기준', '방향', '시각',
-  '관점', '태도', '자세', '역할', '의미', '가치', '영향력', '분위기', '인식', '확산',
+  '관점', '태도', '자세', '역할', '의미', '가치', '영향력', '분위기', '인식',
   '지연', '기피', '증가', '감소', '이해', '파악', '진단', '제시',
   // 일상구 및 관형사/서술어/부사 차단 보강
   '문제해결', '문제해결력', '탐구력', '사고력', '방어기제', '함께하기', '새로운', '있으며',
@@ -425,7 +425,7 @@ export const CONCEPT_EXCLUDE = new Set([
   // 범용 추상명사
   '상호작용', '상관관계', '정당성', '타당성', '가능성', '중요성', '필요성', '다양성', '특성', '유형',
   '단계', '원인', '예방', '예방책', '중심', '바탕', '수준', '기준', '방향', '시각',
-  '관점', '태도', '자세', '역할', '의미', '가치', '영향력', '분위기', '인식', '확산',
+  '관점', '태도', '자세', '역할', '의미', '가치', '영향력', '분위기', '인식',
   '지연', '기피', '증가', '감소', '이해', '파악', '진단', '제시',
   // 일상구 및 관형사/서술어/부사 차단 보강
   '문제해결', '문제해결력', '탐구력', '사고력', '방어기제', '함께하기', '새로운', '있으며',
@@ -674,7 +674,7 @@ export interface ConceptMatch {
   isDynamic?: boolean;
 }
 
-const CONTEXT_SENSITIVE_CONCEPTS: Record<string, { required: RegExp; forbidden: RegExp }> = {
+const CONTEXT_SENSITIVE_CONCEPTS: Record<string, { required?: RegExp; forbidden?: RegExp; customCheck?: (t: string) => boolean }> = {
   확산: {
     required: /(?:농도|세포막|기체|액체|분자|삼투|용액|입자|물리|화학|생명|생물|온도|압력|브라운)/,
     forbidden: /(?:정보|가짜|문화|소문|인식|전파|피해|유행|SNS|사회|바이러스성\s*정보)/
@@ -771,6 +771,22 @@ const CONTEXT_SENSITIVE_CONCEPTS: Record<string, { required: RegExp; forbidden: 
   표준화: {
     required: /(?:정규분포|표본|평균|표준편차|확률|통계|Z점수|분포)/,
     forbidden: /(?:매뉴얼\s*표준화|국제\s*표준|규격|업무\s*표준화|표준화된\s*매뉴얼|표준화된\s*양식)/
+  },
+  '확증 편향': {
+    customCheck: (t: string) => {
+      const isInvest = /(?:수사|면담|목격자|피해자|진술|경찰|프로파일링|범죄|심리)/.test(t);
+      const isMedia = /(?:미디어|뉴스|SNS|플랫폼|유튜브|알고리즘|기사)/.test(t);
+      if (isInvest && !isMedia) return false;
+      return true;
+    }
+  },
+  '미디어 리터러시': {
+    customCheck: (t: string) => {
+      const isInvest = /(?:수사|면담|목격자|피해자|진술|경찰|프로파일링|범죄|심리)/.test(t);
+      const isMedia = /(?:미디어|뉴스|SNS|플랫폼|유튜브|알고리즘|기사)/.test(t);
+      if (isInvest && !isMedia) return false;
+      return true;
+    }
   }
 };
 
@@ -810,6 +826,9 @@ export function findConcepts(t: string, dynamicKeywords?: KeywordScore[] | strin
       }
       const guard = CONTEXT_SENSITIVE_CONCEPTS[c.term] || CONTEXT_SENSITIVE_CONCEPTS[termName];
       if (guard) {
+        if (guard.customCheck && !guard.customCheck(t)) {
+          matched = false;
+        }
         if (guard.forbidden && guard.forbidden.test(t)) {
           matched = false;
         }
@@ -1229,7 +1248,7 @@ export function isValidInquiryTopic(q: string): boolean {
   if (/(?:새로운\s*과학적\s*기술|생명력\s*충만|삶에\s*대한\s*지향|아니라\s+.*사람|책의\s*문구에\s*공감|박수\s*하다)/.test(t)) {
     return false;
   }
-  if (/에\s*대한\s*(?:지향|동경|갈등)$/.test(t)) {
+  if (/(?:에\s*대한|에서\s*오는)\s*(?:지향|동경|갈등)$/.test(t)) {
     return false;
   }
   if (/^[가-힣]{2,4}하다$/.test(t)) {
@@ -2144,7 +2163,7 @@ export function isMajorCompatible(dept: string, targetMajor: string, flds: any[]
   const isFreeMajor = /자[유율]전공|무전공/.test(targetMajor);
   if (isFreeMajor) {
     // 자유전공/무전공 지원 시 자연과학/공학/어문 특정 기출 질문 및 특정 학과 차단
-    if (qText && /(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달)/.test(qText)) {
+    if (qText && /(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달|광해군|인조|임진왜란|조선\s*왕조|아두이노|작곡)/.test(qText)) {
       return false;
     }
     if (dept && /(?:공학|이과|자연|생명|화학|물리|의예|간호|약학|전자|기계|배터리|신소재|어문|국문|영문|중문|일문)/.test(dept)) {
@@ -2169,17 +2188,19 @@ export function isMajorCompatible(dept: string, targetMajor: string, flds: any[]
 
 export function stripQPrefix(str: string): string {
   let s = (str || '').trim();
-  s = s.replace(/^\[[^\]]+\]\s*/, '').trim();
-  s = s.replace(/^(?:전공|인성|공통|기초|심화)\s*[-–—:：]\s*/, '').trim();
+  const BULLET_PREFIX_RE = /^[•⦁▪■□▶▷◆◇○●★☆※•∙\-\–—\d.)\]]+\s*/;
   const PREFIX_RE = /^\s*(?:(?:\d+(?:-\(?\d+\)?|\.\d+)?|Q\d*)\s*[.):?!+\-]|(?:\(\d+\)|\[\d+\]|[①-⑮]))\s*/i;
-  while (PREFIX_RE.test(s)) {
-    const next = s.replace(PREFIX_RE, '').trim();
-    if (next === s || next.length === 0) break;
-    s = next;
+  let prev = '';
+  while (prev !== s) {
+    prev = s;
+    s = s.replace(/^\[[^\]]+\]\s*/, '').trim();
+    s = s.replace(PREFIX_RE, '').trim();
+    s = s.replace(BULLET_PREFIX_RE, '').trim();
+    s = s.replace(/^[-•⦁▪·▶+?]\s*/, '').trim();
+    s = s.replace(/^질문\s*[:：]?\s*/i, '').trim();
+    s = s.replace(/^(?:전공|인성|공통|기초|심화)\s*[-–—:：]\s*/, '').trim();
   }
-  s = s.replace(/^[-•·▶+?]\s*/, '').replace(/^질문\s*[:：]?\s*/i, '').trim();
-  s = s.replace(/^(?:전공|인성|공통|기초|심화)\s*[-–—:：]\s*/, '').trim();
-  return s;
+  return s.trim();
 }
 
 const NOISE_RE = /(?:기억(?:은|이)?\s*안|기억(?:나지|이\s*나지)|잘\s*기억|고사실|대기실|입실|착석|퇴실|면접관|진행방식|후기|분위기|팁|꿀팁|생략|^\(?꼬리|모르겠|질문\s*없음|자소서|자기\s*소개서|생기부\s*질문|생기부\s*관련|교과\s*질문|전공\s*질문|답변\s*못함|말씀을 들어보니|기억(?:이|은)?\s*나나요|기억나나요|기억\s*나시나요|바운\s*지|바운\s*거|답변\s*☞|논리적\s*사고력\s*[-–]|오는\s*길|코로나|학급\s*신문|\[질문\d*\]|면접\s*준비\s*TIP|여쑤어|득히|부산대학교∙\d+|특수목적대학|기본소양[ⅠⅡI0-9_]*|보조질문\d*|한중\s*문화갈등|조사를\s*했는데|질문\s*및\s*을|국제\s*답변\s*사회|답변\s+[가-힣]+의)/i;
@@ -2192,6 +2213,8 @@ const VALID_QUESTION_END_RE = /(?:\?|인가요|무엇인가요|어떤가요|설�
 const BROKEN_TEXT_RE = /[가-힣],[가-힣]{6,}|인공지는/;
 const BROKEN_OR_DEPENDENT_RE = /(?:[①-⑮]|B가\s|은호|제시된\s*(?:기술|방안|자료|문제)|이러한\s*(?:질병|기술|문제|현상)|제기된\s*방안|이렇게\s*어려움을|그\s*지식은|그렇게\s*생각하게\s*된|^[가-힣]{1,2}\s*생겨|공통\s*\d+번|답변고등|반영\s*비율|\d{2}%)/;
 const OCR_BROKEN_RE = /(?:혁생|선골|독득|퍼이지|닌도|범랍|상성형|고촬|확습|역할은및|좋은및것|때이\s|(?<![가-힣])입하(?![가-힣])|형징|폭날게|층미|개획|경철행정|목묘|(?<![가-힣])하당(?![가-힣])|수단만으로대하는|동역사|위첩|요즘\s*시가\s*발달|이유런던|역물|수및있을까요)/;
+const PDF_CORRUPT_RE = /(?:[가-힣](?:학업|진로|공동체|인성)역량|(?:학업|진로|공동체)역량\s*[가-힣]|[가-힣]+\s+\d+\.\s+|만약\s*이\s*갈등|만약이\s*갈등|위\s*제시문|다음\s*자료|아래\s*글|이\s*사례에서|[•⦁▪■□▶▷◆◇○●★☆※])/;
+const OTHER_STUDENT_PREMISE_RE = /(?:(?:작곡|기숙사|봉사활동|교육봉사|멘토링|동아리|대회|실험|프로젝트|보고서|발표|탐구|연구|독서|활동|역할|경험|반장|부반장|학생회|리더|조장).{0,25}(?:했다고\s*했는데|을\s*했는데|를\s*했는데|했는데[,?\s]|하셨는데|하셨던|한\s*것\s*같은데|한것\s*같은데|경험이\s*많은데|말씀해\s*주셨는데)|했다고\s*했는데|하셨던\s*데|경험이\s*많은데|목표라고\s*했으니)/;
 const UNIV_NAMES_RE = /(?:서울대|연세대|고려대|성균관대|서강대|한양대|중앙대|경희대|한국외대|시립대|이화여대|건국대|동국대|홍익대|숙명여대|국민대|숭실대|세종대|단국대|아주대|인하대|부산대|경북대|전남대|충남대|충북대|전북대|강원대|제주대|가톨릭대|가천대|우송대|교원대|한국교원대|대구교대|경인교대|서울교대|공주교대|광주교대|청주교대|춘천교대|진주교대|전주교대)/;
 const DISALLOWED_PAST_ACTIVITIES_RE = /(?:수상|상을|환선굴|범람원|한국\s*지리|서계\s*지리|중학교\s*역사|기술\s*가정|파이선|통역사|고추\s*농사|도핑|방위산업|예술작품|특수학급.*지리|파리\s*주택|멘토링|또래교사|쓰여\s*있는데|내용을\s*보면|보니까)/;
 const PAST_OTHER_ACTIVITY_RE = /(?:했을\s*때|했네요|했다는데|하였는데|하셨다는데|하셨다\s*하는데|하셨다고|하셨는데|하셨나요|수행평가로|수행평가|동아리\s*시간에|수업\s*시간에|적혀\s*있|적혀있|했다고\s*(?:적혀|하는|되어|들었|하셨)|(?:연구|조사|탐구|실험|발표|제작|개발|작성|확인|정리)\s*(?:했다고|하셨다고|하셨다|했다|하였다)|알아봤다고|배웠다고|들었다고|적혔다고|적혀있다고|했던데|했더군요|하셨던데|개발하였|개발했|을\s*읽고|를\s*읽고|관찰하여|비교하고\s*정리|을\s*제작했|를\s*제작했|을\s*분석했|를\s*분석했|을\s*발표했|를\s*발표했|을\s*만들었|를\s*만들었|을\s*진행했|를\s*진행했|을\s*조사했|를\s*조사했|을\s*탐구했|를\s*탐구했|에서\s*본인이|에서\s*자신이|만들\s*때\s*어떤|활동들을\s*했던데|보고서를\s*제출한|보고서를\s*(?:작성|제출)|활동에서\s*.*조사|활동에서\s*.*실험|동아리\s*활동에서|진로활동에서|자율활동에서|봉사활동에서|[1-3]학년\s*(?:때|[가-힣]+시간)|(?:생기부|세특|개세특|학생부|자소서)에\s*(?:적힌|있는|나온|기록된))/;
@@ -2219,6 +2242,8 @@ export function isCleanQuestion(qStr: string, recTxt: string, validKeywords: str
   if (BROKEN_TEXT_RE.test(qStr)) return false;
   if (BROKEN_OR_DEPENDENT_RE.test(qStr)) return false;
   if (OCR_BROKEN_RE.test(qStr)) return false;
+  if (PDF_CORRUPT_RE.test(qStr)) return false;
+  if (OTHER_STUDENT_PREMISE_RE.test(qStr)) return false;
   if (DISALLOWED_PAST_ACTIVITIES_RE.test(qStr)) return false;
   if (PAST_OTHER_ACTIVITY_RE.test(qStr)) return false;
   if (/<[^>]+>|class\s*=|span\s+class/i.test(qStr)) return false;
@@ -2228,7 +2253,7 @@ export function isCleanQuestion(qStr: string, recTxt: string, validKeywords: str
 
   // 자유전공/무전공 지원 시 자연과학/공학 심화 기출 및 특정 어문 기출 차단
   if (/자[유율]전공|무전공/.test(targetMajor)) {
-    if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달)/.test(qStr)) {
+    if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달|광해군|인조|임진왜란|조선\s*왕조|아두이노|작곡)/.test(qStr)) {
       return false;
     }
   }
@@ -2347,38 +2372,49 @@ export function splitCaseQs(qTxt: string, aTxt: string, recTxt: string, validKey
   return pairs;
 }
 
-const TAIL_SPLIT_RE = /(?:기록되어 있습니다|기록이 있습니다|기록되어 있는데|기록이 있는데|기록되었습니다|활동을 했는데|발표했다고 기록되어 있습니다|발표했다고 되어 있는데|작성했다고 기록되어 있습니다|언급해 주었는데|언급되어 있는데|있다는 내용이 있는데|제시했다는 내용이 있는데|기록이 있네요|작성했다고 하는데|탐구했다고 하는데|조사했다고 기록되어 있습니다|조사했다고 하는데|발표한 기록이 있는데|보고서를 작성했는데요|보고서에 대한 내용이 있는데|했다고 하는데요|했다고 하는데|활동을 하였네요|활동을 하였는데|활동을 하였는데,|추가탐구를 하였는데요|설명했다는 기록이 있네요|설명했다는 내용이 있네요)[.,]?\s*/;
-
-const BAD_UNIV_TAIL_RE = /(?:소설|작품|‘?OOO’?|‘?○○○’?|문화\s*변동|표본|모집단|조건부\s*확률|이항\s*분포|이항분포|정규분포|미분|적분|호흡\s*과정|에너지\s*생성|중화\s*적정|농도|로봇팔|좌표평면|전해질|전지|화학적|물리적|수학적|역사적|책에서|기술\s*발전|설명문|절대우위|비교우위|기억에\s*남는\s*질문|어떤\s*점\s*에서\s*공감|알코올\s*발효|효모|가격탄력성|아리스토텔레스|효소|지방분권화|고유값|리만|사이버폭력|가르칠\s*때|고사성어|알파계수|출결|유물|건축물|디지털\s*교과서|이\s*과정을|어떤\s*사례가|포물선|전자기\s*유도|충격량|운동량|파동|초음파|인슐린|함수|특이적\s*방어|면역|산화|환원|DNA|노화|복제|저작권|비문학|정서|헌법|샤를|보일|광전|태양전지|뉴턴|케플러|세포|아미노산|단백질|전류|전압|회로|저항|자기장|유전자|염색체|방정식|확률|통계|미적분|기하|수학|물리|화학|생명|지구과학|국어|영어|역사|지리|경제|정치|사회문화|윤리|도덕|한문|일본어|중국어|독일어|프랑스어|단원|신조어|고양이|pH|코일|문화유산|형질|실험)/i;
-
-const DEMONSTRATIVE_RE = /(?:이러한|이런|그\s*(?:책|글|인물|작품|이론|현상|작가|지식|질병|기술|문제|기획|평가|행동|과정|함수|이유|내용|방법|부분)|두\s*이론|해당\s*(?:재료|효율|신조어|역할|내용|주제)|당시\s*발표했던|위의|제시된|제기된|선정한\s*도서|그렇게\s*생각하게\s*된|작성할\s*때|그중\s*하나|이\s*문제를)/;
-
-const VALID_UNIVERSAL_TAIL_RE = /(?:어려웠던\s*점|해결\s*과정|해결했는지|극복|소통|협력|협업|핵심\s*개념|핵심\s*의미|본인의\s*말로|발전시키|연결하고\s*싶은|역량을\s*길렀|공동체를\s*위해|중요하게\s*생각|가장\s*의미\s*있었던|가설을\s*세웠고|어떤\s*해결방안|관심을\s*갖게\s*된\s*계기|구체적인\s*계기|구체적으로\s*설명|어떤\s*내용인지|소개해\s*보세요|설명해\s*주세요|말씀해\s*주세요|알려주세요|생각하나요|평가받았다고|어떤\s*플러스|본인의\s*관점|어떤\s*방식으로|배우고\s*느낀|인상적이었)/;
-
-export function extractUnivQTails(univ: string, pastData?: PastExamData | null): Array<{ cat: string; b?: 'A' | 'C' | 'P'; tail: string; orig: string; head: string }> {
+export function extractUnivQTails(
+  univ: string,
+  pastData?: PastExamData | null
+): Array<{ cat: string; b: 'A' | 'C' | 'P'; tail: string; orig: string; head: string }> {
   const data = pastData || getPastExamData();
-  const d = data && data.UNIV_Q && data.UNIV_Q[univ] ? data.UNIV_Q[univ] : {};
-  const tails: Array<{ cat: string; b?: 'A' | 'C' | 'P'; tail: string; orig: string; head: string }> = [];
-  for (const [cat, qs] of Object.entries(d)) {
-    for (const q of qs) {
-      const parts = q.split(TAIL_SPLIT_RE);
-      if (parts.length > 1) {
-        let tail = parts[1].trim().replace(/^[.,\s]+/, '');
-        tail = tail.replace(/^(?:요|네|그렇다면|그러면)[,\s]*/, '');
-        tail = tail.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
-        tail = tail.replace(/^[.\s]+/, '').trim();
-        if (
-          tail.length >= 10 &&
-          !BAD_UNIV_TAIL_RE.test(tail) &&
-          !DEMONSTRATIVE_RE.test(tail) &&
-          VALID_UNIVERSAL_TAIL_RE.test(tail)
-        ) {
-          tails.push({ cat, tail, orig: q, head: parts[0].trim() });
-        }
-      }
-    }
+  const d = data && data.UNIV_Q && data.UNIV_Q[univ] ? data.UNIV_Q[univ] : null;
+
+  let academicScore = 0;
+  let careerScore = 0;
+  let commScore = 0;
+
+  if (d) {
+    const allQs = Object.values(d).flat().join(' ');
+    academicScore = (allQs.match(/(?:원리|개념|이유|한계|증명|심화|원인|학업|분석|근거|탐구)/g) || []).length;
+    careerScore = (allQs.match(/(?:전공|진로|지원|발전|목표|학과|관심|계기|역량)/g) || []).length;
+    commScore = (allQs.match(/(?:공동체|인성|협력|갈등|배려|소통|모둠|구성원|역할)/g) || []).length;
   }
-  return tails;
+
+  // [구조 개선 1] 어느 교과·활동 문장 뒤에 붙여도 100% 자연스러운 화이트리스트 화법 뱅크
+  const aTails = [
+    { cat: '학업', b: 'A' as const, tail: '해당 탐구에서 활용한 핵심 개념과 원리를 본인의 말로 명확하게 설명해 주세요.', orig: '해당 탐구에서 활용한 핵심 개념과 원리를 본인의 말로 명확하게 설명해 주세요.', head: '' },
+    { cat: '학업', b: 'A' as const, tail: '활동 과정에서 가장 어려웠던 점이나 예상과 달랐던 점은 무엇이었으며, 이를 어떻게 해결했는지 구체적으로 설명해 주세요.', orig: '활동 과정에서 가장 어려웠던 점이나 예상과 달랐던 점은 무엇이었으며, 이를 어떻게 해결했는지 구체적으로 설명해 주세요.', head: '' },
+    { cat: '학업', b: 'A' as const, tail: '이 탐구를 통해 도출한 결론을 뒷받침하는 핵심 근거와, 스스로 보완하고 싶은 한계점은 무엇인지 말씀해 주세요.', orig: '이 탐구를 통해 도출한 결론을 뒷받침하는 핵심 근거와, 스스로 보완하고 싶은 한계점은 무엇인지 말씀해 주세요.', head: '' }
+  ];
+
+  const cTails = [
+    { cat: '전공', b: 'C' as const, tail: '이 주제를 대학에 입학해 더 깊이 있게 발전시킨다면 어떤 연구나 전공 과목으로 연결하고 싶은가요?', orig: '이 주제를 대학에 입학해 더 깊이 있게 발전시킨다면 어떤 연구나 전공 과목으로 연결하고 싶은가요?', head: '' },
+    { cat: '전공', b: 'C' as const, tail: '이 탐구를 통해 지원 전공에서 필요로 하는 어떤 핵심 역량을 길렀다고 생각하는지 구체적으로 설명해 주세요.', orig: '이 탐구를 통해 지원 전공에서 필요로 하는 어떤 핵심 역량을 길렀다고 생각하는지 구체적으로 설명해 주세요.', head: '' },
+    { cat: '전공', b: 'C' as const, tail: '이 활동에서 생긴 문제의식이 자신의 진로 목표나 전공 선택을 구체화하는 데 어떤 영향을 미쳤나요?', orig: '이 활동에서 생긴 문제의식이 자신의 진로 목표나 전공 선택을 구체화하는 데 어떤 영향을 미쳤나요?', head: '' }
+  ];
+
+  const pTails = [
+    { cat: '인성', b: 'P' as const, tail: '역할을 수행하는 과정에서 구성원 간 의견 차이나 어려움이 생겼을 때, 이를 극복하기 위해 어떻게 소통하고 조율했는지 설명해 주세요.', orig: '역할을 수행하는 과정에서 구성원 간 의견 차이나 어려움이 생겼을 때, 이를 극복하기 위해 어떻게 소통하고 조율했는지 설명해 주세요.', head: '' },
+    { cat: '인성', b: 'P' as const, tail: '이 활동을 추진하면서 공동체와 구성원을 위해 가장 중요하게 생각한 가치는 무엇이었고, 이를 실천하기 위해 어떤 노력을 했는지 설명해 주세요.', orig: '이 활동을 추진하면서 공동체와 구성원을 위해 가장 중요하게 생각한 가치는 무엇이었고, 이를 실천하기 위해 어떤 노력을 했는지 설명해 주세요.', head: '' }
+  ];
+
+  if (commScore > academicScore && commScore > careerScore) {
+    return [pTails[0], cTails[0], aTails[0], pTails[1], cTails[1], aTails[1], cTails[2], aTails[2]];
+  } else if (careerScore > academicScore) {
+    return [cTails[0], aTails[0], cTails[1], aTails[1], cTails[2], aTails[2], pTails[0], pTails[1]];
+  } else {
+    return [aTails[0], cTails[0], aTails[1], cTails[1], aTails[2], cTails[2], pTails[0], pTails[1]];
+  }
 }
 
 export function matchCases(univ: string, major: string, field: any, pastData?: PastExamData | null): Array<{ i: number; s: number; r: any }> {
@@ -2459,7 +2495,7 @@ export function qbMatch(
     const r = qb.R[i];
     if (opts.pool && (r[8] || r[4] === 3 || (r[4] === 4 && !r[2]))) continue;
     if (opts.pool && /자[유율]전공|무전공/.test(major)) {
-      if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달)/.test(r[0])) continue;
+      if (/(?:촉매|전고체|배터리|이차전지|2차\s*전지|광촉매|연료전지|반도체|화학적|한국어의\s*발전|미분|적분|양자|전기차|리튬|소설\s*구성|작품에서|전기회로|전자회로|리포좀|약물\s*전달|광해군|인조|임진왜란|조선\s*왕조|아두이노|작곡)/.test(r[0])) continue;
       if (r[2] && /(?:공학|이과|자연|생명|화학|물리|의예|간호|약학|전자|기계|배터리|신소재|어문|국문|영문|중문|일문)/.test(r[2])) continue;
     }
     if (opts.pool && r[4] === 2 && !(med || teach) && !/협력|갈등|배려|봉사|리더|공동체|인성|윤리|도움|소통|소외|규칙|규정|정직|도덕|가치|태도/.test(r[0])) continue;
@@ -2514,6 +2550,16 @@ function mulberry(seed: number) {
 // ============================================================
 // 8. 룰 엔진 후보 풀 빌더 (buildRuleCandidatePool)
 // ============================================================
+export const P_INTERACTION_POSITIVE_RE = /(?:모둠원|팀원|조원|학급\s*반장|부반장|학생회|조장|모둠장|동아리장|구성원|급우|학우|친구들|동료|멘토|멘티|후배|선배|스터디그룹|협업|협동|역할\s*분담|의견을?\s*(?:수렴|조율|경청)|갈등을?\s*(?:해결|조율|중재)|자발적\s*참여를\s*이끌|도움을?\s*주|배려하|나눔|봉사)/;
+export const P_INTERACTION_NEGATIVE_RE = /(?:소감을\s*작성|활동을\s*설계|가사를\s*찾아|견해를\s*논리적으로|심화\s*탐구를\s*진행|법\s*개정\s*방향|제도를?\s*검토|정책을?\s*제안|선의\s*간격|리듬감|곡선의\s*흐름|시각적\s*밀도|작품을\s*제작|구상권|피해자\s*중심|갈등\s*사례|민원\s*갈등|사회적\s*갈등|인물\s*간\s*갈등)/;
+
+export function isStrictCommunitySentence(s: SentenceItem): boolean {
+  if (!s || !s.text) return false;
+  const t = s.text;
+  if (P_INTERACTION_NEGATIVE_RE.test(t)) return false;
+  return P_INTERACTION_POSITIVE_RE.test(t);
+}
+
 export function buildRuleCandidatePool(
   records: StudentRecordItem[],
   targetMajor: string,
@@ -2754,110 +2800,87 @@ export function buildRuleCandidatePool(
     });
   });
 
-  // [3] Fusion Questions (from UNIV_Q tails)
-  const univTails = extractUnivQTails(U, pastData);
-  const fallbackTails = [
-    { cat: '인성', b: 'P' as const, tail: '이 활동을 추진하면서 공동체를 위해 어떤 점을 가장 중요하게 생각했고, 이를 위해 어떤 노력을 했는지 설명해 주세요.' },
-    { cat: '인성', b: 'P' as const, tail: '역할을 수행하는 과정에서 발생한 어려움을 극복하기 위해 구성원들과 어떻게 소통하고 협력했는지 설명해 주세요.' },
-    { cat: '전공', b: 'C' as const, tail: '이 탐구를 통해 지원 전공에서 필요로 하는 어떤 역량을 길렀다고 생각하는지 설명해 주세요.' },
-    { cat: '전공', b: 'C' as const, tail: '이 주제를 대학에 입학해 더 깊이 있게 발전시킨다면 어떤 연구나 전공 과목으로 연결하고 싶은가요?' },
-    { cat: '학업', b: 'A' as const, tail: '활동 과정에서 가장 어려웠던 점이나 예상과 달랐던 점은 무엇이었으며, 이를 어떻게 해결했는지 구체적으로 설명해 주세요.' },
-    { cat: '학업', b: 'A' as const, tail: '해당 탐구에서 활용한 핵심 개념과 핵심 의미를 본인의 말로 명확하게 설명해 주세요.' }
-  ];
-
-  const allTails = [...univTails, ...fallbackTails];
-
+  // [3] Fusion Questions (from Whitelist Phrasing Bank)
+  const allTails = extractUnivQTails(U, pastData);
   let purePCount = 0;
   allTails.forEach((tObj, tIdx) => {
-    let b: 'A' | 'C' | 'P' = tObj.b || 'A';
-    if (!tObj.b) {
-      if (/공동체|인성|갈등|협력|배려|리더|친구|모둠|기획|소통|동료|나눔|봉사/.test(tObj.cat) || /공동체|기획|갈등|역할|노력|구성원|소통|배려|협력/.test(tObj.tail)) b = 'P';
-      else if (/진로|전공|지원|계기|관심|직업|미래/.test(tObj.cat) || /진로|전공|진학|관심|학습|역량/.test(tObj.tail)) b = 'C';
-    }
-
-    const candidates = sents.filter((s) => {
-      if (b === 'P') {
-        // [핀포인트 2 & 최종 마감] P(공동체역량) 영역은 오직 행특 또는 창체의 순수 인성·협업·공동체 문장만 선별
-        if (s.f && (s.f.experiment || s.f.make_hw || s.f.make_sw)) return false;
-        if (s.concepts && s.concepts.some((c) => c.isBuiltin)) return false;
-        if (/(?:전자기\s*유도|적조|캐시\s*메모리|엽록소|시금치|다행시|문법|조계지|미적분|화학|물리|생명|지구과학|해파)/.test(s.text)) return false;
-        if (/(?:소감을\s*작성|활동을\s*설계|가사를\s*찾아|견해를\s*논리적으로\s*서술|심화\s*탐구를\s*진행)/.test(s.text)) return false;
-        if (/(?:지구과학|물리|화학|생명과학|수학|미적분|기하|정보|프로그래밍)/.test(s.subj || '')) return false;
-        return Boolean(s.sec === '행특' || (s.f && (s.f.leader || s.f.care || s.f.conflict || (s.f.coop && s.sec === '창체'))));
-      }
-      if (b === 'C') return s.rel || s.area === '진로활동' || (s.f && s.f.read);
-      return s.f && (s.f.experiment || s.f.inquiry || s.f.make || s.concepts.length > 0);
-    });
-
+    const b: 'A' | 'C' | 'P' = tObj.b;
     let matchSent: SentenceItem | null = null;
+
     if (b === 'P') {
-      if (candidates.length > 0) {
-        if (purePCount >= 1 && candidates.length <= 1) {
-          // 인성·협업 문장이 부족하여 적격 문장이 0~1개뿐이라면 [예시화법] 질문 수를 최대 1개로 제한
-          return;
-        }
-        matchSent = candidates[tIdx % candidates.length];
+      const pCandidates = sents.filter(isStrictCommunitySentence);
+      if (pCandidates.length === 0) {
+        // [구조 개선 2] 폴백 완전 금지: 조건 통과 문장이 0개면 P [예시화법]은 0개만 생성 (억지 채움 절대 금지)
+        return;
+      }
+      if (purePCount >= 1) {
+        // 1개면 1개만 생성
+        return;
+      }
+      matchSent = pCandidates[0];
+    } else if (b === 'C') {
+      const cCandidates = sents.filter((s) => !isStrictCommunitySentence(s) && (s.rel || s.area === '진로활동' || (s.f && s.f.read)));
+      if (cCandidates.length > 0) {
+        matchSent = cCandidates[tIdx % cCandidates.length];
+      } else {
+        matchSent = sents.find((s) => !isStrictCommunitySentence(s)) || null;
       }
     } else {
-      matchSent = candidates.length > 0 ? candidates[tIdx % candidates.length] : sents[tIdx % sents.length];
-    }
-
-    if (!matchSent && b === 'P') {
-      // 순수 공동체/인성 보편 질문 (이과 과학 개념 문장 오결합 원천 차단, 최대 1개만 생성)
-      if (purePCount < 1) {
-        purePCount++;
-        pool.push(
-          Q({
-            b: 'P',
-            k: `ufus_pure_p_${tIdx}`,
-            p: 3.2,
-            type: '화법융합',
-            tplId: `fusion_univ_p_${tIdx % 10}`,
-            src: '융합',
-            srcBadge: fusionBadge,
-            catGroup: 'fusion',
-            text: '모둠 활동이나 공동체 과제를 수행하면서 겪었던 의견 조율이나 협력의 구체적인 사례를 들어 말씀해 보세요.',
-            ans: '공동체 내에서 겪은 실제 소통 및 협업 경험을 구체적 사례와 함께 답변하세요.',
-            ansLabel: '모범 답변 가이드',
-            tip: '대학 입학사정관의 공식 질문 화법과 학생의 공동체 인성을 평가하는 문항입니다.',
-            tails: ['그 과정에서 본인이 양보하거나 배려한 부분은 무엇이었나요?']
-          })
-        );
+      const aCandidates = sents.filter((s) => !isStrictCommunitySentence(s) && (s.f?.experiment || s.f?.inquiry || s.f?.make || s.concepts.length > 0));
+      if (aCandidates.length > 0) {
+        matchSent = aCandidates[tIdx % aCandidates.length];
+      } else {
+        matchSent = sents.find((s) => !isStrictCommunitySentence(s)) || null;
       }
-      return;
     }
-    if (!matchSent && b !== 'P') matchSent = sents[tIdx % sents.length];
 
-    if (matchSent) {
-      if (b === 'P') purePCount++;
-      const topicQ = matchSent.quotes.find((q) => !q.book && isValidInquiryTopic(q.q));
-      const bookQ = matchSent.quotes.find((q) => q.book);
-      const ancQ = (topicQ && topicQ.q) || (bookQ && bookQ.q) || (matchSent.concepts[0] && matchSent.concepts[0].term) || null;
-      const L = lead(matchSent, ancQ, tIdx % 4);
-      const fusedText = `${L} ${tObj.tail}`;
+    if (!matchSent) return;
 
-      const builtinConcept = matchSent.concepts.find((c) => c.isBuiltin && c.def && !c.def.startsWith('학생부 속'));
-      pool.push(
-        Q({
-          b,
-          k: `ufus_${tIdx}_${matchSent.rid}`,
-          p: 3.5 + matchSent.score * 0.2,
-          type: '화법융합',
-          tplId: `fusion_univ_${b.toLowerCase()}_${tIdx % 10}`,
-          src: '융합',
-          srcBadge: fusionBadge,
-          catGroup: 'fusion',
-          text: fusedText,
-          rtext: stripHtmlTags(matchSent.text),
-          rlab: recordLabel(matchSent),
-          sref: matchSent,
-          ans: builtinConcept ? builtinConcept.def : null,
-          ansLabel: builtinConcept ? '관련 개념 정의' : '모범 답변 가이드',
-          tip: '대학 입학사정관의 공식 질문 화법과 학생부 탐구를 연결한 융합 문항입니다.',
-          tails: ['이 활동에서 본인이 주도적으로 해결한 부분을 설명해 주세요.']
-        })
-      );
+    if (b === 'P') purePCount++;
+
+    // Tail selection
+    let tailText = tObj.tail;
+    if (b === 'P') {
+      if (matchSent.f && (matchSent.f.leader || matchSent.f.conflict)) {
+        tailText = '역할을 수행하는 과정에서 구성원 간 의견 차이나 어려움이 생겼을 때, 이를 극복하기 위해 어떻게 소통하고 조율했는지 설명해 주세요.';
+      } else if (matchSent.f && (matchSent.f.coop || matchSent.f.care)) {
+        tailText = '이 활동을 추진하면서 공동체와 구성원을 위해 가장 중요하게 생각한 가치는 무엇이었고, 이를 실천하기 위해 어떤 노력을 했는지 설명해 주세요.';
+      }
+    } else if (b === 'A') {
+      if (matchSent.f && (matchSent.f.experiment || matchSent.f.make_hw || matchSent.f.make_sw)) {
+        if (tIdx % 2 === 0) {
+          tailText = '설계·실험 과정에서 예상치 못한 변수나 오차가 발생했을 때 어떤 원리로 원인을 분석하고 개선했는지 설명해 주세요.';
+        }
+      }
     }
+
+    const topicQ = matchSent.quotes.find((q) => !q.book && isValidInquiryTopic(q.q));
+    const bookQ = matchSent.quotes.find((q) => q.book);
+    const ancQ = (topicQ && topicQ.q) || (bookQ && bookQ.q) || (matchSent.concepts[0] && matchSent.concepts[0].term) || null;
+    const L = lead(matchSent, ancQ, tIdx % 4);
+    const fusedText = `${L} ${tailText}`;
+
+    const builtinConcept = matchSent.concepts.find((c) => c.isBuiltin && c.def && !c.def.startsWith('학생부 속'));
+    pool.push(
+      Q({
+        b,
+        k: `ufus_${tIdx}_${matchSent.rid}`,
+        p: 3.5 + matchSent.score * 0.2,
+        type: '화법융합',
+        tplId: `fusion_univ_${b.toLowerCase()}_${tIdx % 10}`,
+        src: '융합',
+        srcBadge: fusionBadge,
+        catGroup: 'fusion',
+        text: fusedText,
+        rtext: stripHtmlTags(matchSent.text),
+        rlab: recordLabel(matchSent),
+        sref: matchSent,
+        ans: builtinConcept ? builtinConcept.def : null,
+        ansLabel: builtinConcept ? '관련 개념 정의' : '모범 답변 가이드',
+        tip: '대학 입학사정관의 공식 질문 화법과 학생부 탐구를 연결한 융합 문항입니다.',
+        tails: ['이 활동에서 본인이 주도적으로 해결한 부분을 설명해 주세요.']
+      })
+    );
   });
 
   // [4] Past Questions from CASES (지원 대학 입력 시에만 활성화)
@@ -3437,7 +3460,17 @@ export function generateAdditionalRuleQuestions(
         '실험이나 실습 과정에서 예상치 못한 변수로 인해 오차가 발생했을 때, 이를 학술적으로 검증하고 보완했던 과정을 설명해 주세요.',
         '학습한 원리를 일상생활 속 현상이나 사회적 문제에 적용해 보고자 시도했던 탐구 활동이 있다면 소개해 주세요.',
         '학업에 몰입하여 시간 가는 줄 모르고 탐구에 빠져들었던 경험과 그를 통해 얻은 지적 희열에 대해 말씀해 주세요.',
-        '자신의 학업적 강점과 보완해야 할 약점은 무엇이라고 생각하며, 이를 어떻게 관리하고 발전시켜 왔나요?'
+        '자신의 학업적 강점과 보완해야 할 약점은 무엇이라고 생각하며, 이를 어떻게 관리하고 발전시켜 왔나요?',
+        '학습 내용을 장기 기억으로 전환하거나 깊이 있게 내면화하기 위해 활용했던 본인만의 복습 또는 정리 방식은 무엇인가요?',
+        '교과서나 강의에서 배운 이론이 현실 세계에서 실제로 어떻게 작동하는지 호기심을 갖고 추적해 본 사례가 있나요?',
+        '자신의 학업 역량을 스스로 평가해 보았을 때, 가장 자신 있는 역량과 앞으로 더 보완하고 싶은 역량은 무엇인가요?',
+        '학업 수행 과정에서 예상했던 결론과 전혀 다른 결과가 나왔을 때, 원인을 분석하고 방향을 재설정했던 경험이 있나요?',
+        '어떤 학문적 주제에 대해 깊이 파고들면서 스스로 질문을 만들고 그 답을 찾아갔던 자기주도적 학습 과정을 설명해 주세요.',
+        '자신이 속한 전공 관련 교과에서 가장 기본적이면서도 중요하다고 생각하는 학문적 원리는 무엇인가요?',
+        '수행평가나 과제 연구를 진행하면서 자료의 신뢰성과 타당성을 검증하기 위해 기울인 노력은 무엇이었나요?',
+        '새로운 개념이나 학술 용어를 접했을 때 이를 직관적으로 이해하기 위해 어떤 노력을 기울였는지 말씀해 주세요.',
+        '다양한 관점이 존재하는 학문적 쟁점에 대해 양측의 논거를 균형 있게 검토해 본 경험이 있나요?',
+        '학습 과정에서 겪었던 가장 큰 지적 도전은 무엇이었으며, 이를 통해 어떻게 한 단계 성장할 수 있었나요?'
       ],
       career: [
         '자신의 진로 목표를 구체화하는 데 가장 큰 영향을 미친 고교 생활 속 경험이나 배움의 순간은 무엇이었나요?',
@@ -3455,7 +3488,17 @@ export function generateAdditionalRuleQuestions(
         '고교 시절 수행했던 여러 활동 중 자신의 진로 선택에 결정적인 이정표가 되어준 한 가지 경험을 꼽아주세요.',
         '지원 학과에서 다루는 학문이 본인의 인생관이나 가치관에 어떤 영향을 미칠 것이라 기대하나요?',
         '대학 졸업 후 첫 5년 동안 이루고 싶은 단기적 전문성 개발 목표와 이를 위한 실행 계획은 무엇인가요?',
-        '전공 학습을 지속하는 과정에서 마주할 수 있는 어려움을 극복할 수 있는 본인만의 끈기와 원동력은 무엇인가요?'
+        '전공 학습을 지속하는 과정에서 마주할 수 있는 어려움을 극복할 수 있는 본인만의 끈기와 원동력은 무엇인가요?',
+        '지원 분야에서 일하게 되었을 때 지켜야 할 가장 중요한 직업 윤리나 사회적 책임은 무엇이라고 생각하나요?',
+        '자신의 진로 분야가 직면하고 있는 가장 시급한 과제나 현안은 무엇이며, 이에 대해 어떤 생각을 갖고 있나요?',
+        '자신이 꿈꾸는 진로를 위해 필요한 자질 중 현재 본인이 가장 잘 갖추고 있는 강점은 무엇인가요?',
+        '진로와 관련된 관심 분야를 탐색하면서 새롭게 알게 된 사실 중 가장 흥미로웠던 점은 무엇이었나요?',
+        '대학에서 전공 학업 외에 타 학과와의 융합이나 다학제적 연구를 시도해 보고 싶은 주제가 있나요?',
+        '지원 전공의 발전이 일반 대중의 삶의 질 향상에 어떤 긍정적인 영향을 미칠 수 있다고 보나요?',
+        '자신의 진로 희망이 고교 3년 동안 어떻게 변화하거나 구체화되었는지 그 흐름을 설명해 주세요?',
+        '진로와 관련하여 롤모델로 삼고 있는 인물이나 서적을 통해 배운 가장 중요한 교훈은 무엇인가요?',
+        '대학 진학 후 전공 역량을 키우기 위해 반드시 이수하고 싶은 교과목이나 참여하고 싶은 실험·실습은 무엇인가요?',
+        '자신의 지원 전공을 통해 20~30년 후 우리 사회에 남기고 싶은 자신만의 발자취는 무엇인가요?'
       ],
       community: [
         '고등학교 생활 중 공동의 목표를 달성하기 위해 친구들과 협력하며 가장 크게 배운 점은 무엇인가요?',
@@ -3473,7 +3516,17 @@ export function generateAdditionalRuleQuestions(
         '동료의 장점을 발견하고 이를 칭찬하거나 격려하여 팀의 시너지를 이끌어낸 경험이 있나요?',
         '갈등 상황에서 자신의 의견을 고집하기보다 상대방의 입장을 먼저 수용하고 양보했던 사례가 있나요?',
         '공동체 내에서 소외되거나 적응에 어려움을 겪는 동료를 돕기 위해 실천한 노력이 있다면 설명해 주세요.',
-        '팀 활동 중 무임승차(프리라이더)나 불성실한 태도를 보이는 팀원을 만났을 때 어떻게 대처했나요?'
+        '팀 활동 중 무임승차(프리라이더)나 불성실한 태도를 보이는 팀원을 만났을 때 어떻게 대처했나요?',
+        '서로 다른 의견을 가진 친구들을 설득하거나 합의점을 도출하기 위해 발휘했던 본인만의 소통 방식은 무엇인가요?',
+        '자신이 주도하지 않더라도 타인의 훌륭한 아이디어를 지지하고 팀의 성과로 연결되도록 도왔던 경험이 있나요?',
+        '학급이나 동아리 내에서 규칙이나 약속이 잘 지켜지지 않았을 때 이를 개선하기 위해 제안했던 방법은 무엇인가요?',
+        '어려움에 처한 친구에게 실질적인 도움을 주면서 배려와 연대의 가치를 깊이 깨달았던 사례가 있나요?',
+        '단체 활동 중 예상치 못한 돌발 상황이 발생했을 때 침착하게 대처하여 팀을 안정시켰던 경험을 소개해 주세요.',
+        '공동체의 발전이나 분위기 쇄신을 위해 자발적으로 아이디어를 내고 이를 행동으로 옮긴 경험이 있나요?',
+        '모둠 과제에서 각자의 장점과 특기를 살려 역할을 효과적으로 분담하고 시너지를 낸 사례를 말씀해 주세요.',
+        '친구들과의 협업 과정에서 피드백을 주고받을 때 상처를 주지 않고 건설적인 소통을 이끌어낸 방법은 무엇인가요?',
+        '봉사나 나눔 활동을 통해 스스로의 가치관이나 타인을 대하는 태도에 긍정적인 변화가 일어난 경험이 있나요?',
+        '공동체의 이익과 개인의 편의가 충돌했을 때, 공동체를 우선시하며 성숙한 시민 의식을 발휘한 사례를 설명해 주세요.'
       ],
       university: [
         '수많은 대학 중 특별히 우리 대학의 본 학과에 지원하게 된 가장 결정적인 동기와 계기는 무엇인가요?',
