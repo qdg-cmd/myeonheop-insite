@@ -275,7 +275,7 @@ function parseChangcheSection(text: string, records: StudentRecordItem[]) {
     const start = cur.index + cur.fullMatch.length;
     const end = i < matches.length - 1 ? matches[i + 1].index : withoutBongsa.length;
     let content = withoutBongsa.slice(start, end).trim();
-    content = content.replace(/^특기사항\s*/, '').replace(/\s{2,}/g, ' ').trim();
+    content = content.replace(/^특기사항\s*/, '').replace(/\(?\[?\d+시간\]?\)?/g, '').replace(/\s{2,}/g, ' ').trim();
 
     let subjectName = cur.type;
     if (cur.subDetail) {
