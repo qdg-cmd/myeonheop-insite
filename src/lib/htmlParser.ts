@@ -43,7 +43,7 @@ export function parseCustomStudentRecordHtml(htmlContent: string): {
             grade: item.grade || '1학년',
             type: item.type || '교과학습발달',
             subject: item.subject || '일반',
-            text: item.text,
+            text: (item.text || '').replace(/<[^>]+>/g, '').trim(),
             tags: Array.isArray(item.tags) ? item.tags : [],
             highlightSpans,
           };
@@ -103,7 +103,7 @@ export function parseCustomStudentRecordHtml(htmlContent: string): {
         grade,
         type,
         subject,
-        text: htmlText,
+        text: (textCell.textContent || '').trim(),
         tags,
         highlightSpans,
       });

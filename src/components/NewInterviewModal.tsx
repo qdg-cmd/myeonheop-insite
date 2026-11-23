@@ -154,8 +154,8 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
 
       const profilesToSubmit: StudentInputProfile[] = validItems.map((item) => ({
         name: item.name.trim() || '학생',
-        targetUniversity: item.targetUniversity.trim() || '목표 대학교',
-        targetMajor: item.targetMajor.trim() || '일반 전공',
+        targetUniversity: item.targetUniversity.trim(),
+        targetMajor: item.targetMajor.trim(),
         interviewType,
         records: item.records,
         includeCommonQuestions,
@@ -185,8 +185,8 @@ export const NewInterviewModal: React.FC<NewInterviewModalProps> = ({
       await onSubmit([
         {
           name: pastedName.trim() || '학생A',
-          targetUniversity: pastedUniversity.trim() || '목표 대학교',
-          targetMajor: pastedMajor.trim() || '일반 전공',
+          targetUniversity: pastedUniversity.trim(),
+          targetMajor: pastedMajor.trim(),
           interviewType,
           records: [pastedRecord],
           includeCommonQuestions,

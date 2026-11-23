@@ -1,4 +1,5 @@
 import { StudentRecordItem } from '../types';
+import { cleanKoreanSpacing, cleanLabelText } from './ruleEngine';
 
 /**
  * PDF 및 텍스트 파일 파서
@@ -442,8 +443,8 @@ function parseSubjectSection(text: string, records: StudentRecordItem[]) {
         .replace(/\s{2,}/g, ' ')
         .trim();
 
-      let title = cur.subject;
-      if (cur.semester) title += ` (${cur.semester})`;
+      let title = cleanLabelText(cur.subject);
+      if (cur.semester) title += ` ${cur.semester.replace(/[()]/g, '')}`;
 
       if (content.length > 15) {
         const { textWithHighlights, highlightSpans } = autoHighlightKeySentence(content);
@@ -552,7 +553,7 @@ function autoHighlightKeySentence(text: string): {
   textWithHighlights: string;
   highlightSpans: string[];
 } {
-  const cleanText = (text || '').replace(/<[^>]+>/g, '').trim();
+  const cleanText = cleanKoreanSpacing((text || '').replace(/<[^>]+>/g, '').trim());
   const sentences = cleanText
     .split(/(?<=[.?!])\s+/)
     .map((s) => s.trim())
@@ -575,17 +576,10 @@ function autoHighlightKeySentence(text: string): {
   scored.sort((a, b) => b.score - a.score);
   const bestSentence = scored.find((s) => s.score >= 2)?.sentence;
 
-  if (bestSentence && cleanText.includes(bestSentence)) {
-    return {
-      textWithHighlights: cleanText.replace(
-        bestSentence,
-        `<span class='highlight'>${bestSentence}</span>`
-      ),
-      highlightSpans: [bestSentence],
-    };
-  }
-
-  return { textWithHighlights: cleanText, highlightSpans: [] };
+  return {
+    textWithHighlights: cleanText,
+    highlightSpans: bestSentence ? [bestSentence] : [],
+  };
 }
 
 function extractKeywordsSimple(text: string): string[] {

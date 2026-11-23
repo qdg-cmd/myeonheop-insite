@@ -9,6 +9,20 @@ interface RecordTableProps {
   onSelectSubjectForQuestions?: (subject: string) => void;
 }
 
+const getFormattedRecordHtml = (item: StudentRecordItem): string => {
+  const clean = (item.text || '').replace(/<[^>]+>/g, '').trim();
+  if (item.highlightSpans && item.highlightSpans.length > 0) {
+    let html = clean;
+    for (const span of item.highlightSpans) {
+      if (span && html.includes(span)) {
+        html = html.replace(span, `<span class="highlight">${span}</span>`);
+      }
+    }
+    return sanitizeHtml(html);
+  }
+  return sanitizeHtml(clean);
+};
+
 export const RecordTable: React.FC<RecordTableProps> = ({
   records,
   studentName,
@@ -149,7 +163,7 @@ export const RecordTable: React.FC<RecordTableProps> = ({
                   {/* HTML 형광펜 렌더링 (XSS 방어 새니타이저 적용) */}
                   <div
                     className="student-record-content"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.text) }}
+                    dangerouslySetInnerHTML={{ __html: getFormattedRecordHtml(item) }}
                   />
 
                   {/* AI 추출 역량 태그 */}

@@ -8,8 +8,10 @@ import { QuestionItem, StudentProfile } from '../types';
 export function generateCommon10Questions(
   profile: Pick<StudentProfile, 'name' | 'targetUniversity' | 'targetMajor' | 'interviewType'>
 ): QuestionItem[] {
-  const univ = profile.targetUniversity?.trim() || '목표 대학교';
-  const major = profile.targetMajor?.trim() || '지원 학과';
+  const hasUniv = Boolean(profile.targetUniversity?.trim() && !/^(?:목표\s*대(?:학|학교)?|지원\s*대(?:학|학교)?|희망\s*대(?:학|학교)?)$/.test(profile.targetUniversity.trim()));
+  const hasMajor = Boolean(profile.targetMajor?.trim() && !/^(?:일반\s*전공|지원\s*학과|지원\s*전공|목표\s*학과|희망\s*학과)$/.test(profile.targetMajor.trim()));
+  const univ = hasUniv ? profile.targetUniversity!.trim() : '우리 대학';
+  const major = hasMajor ? profile.targetMajor!.trim() : '지원 전공';
 
   return [
     {
